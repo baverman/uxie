@@ -1,8 +1,5 @@
 import gtk
 
-def get_accel_path(name):
-    return '<Actions>/' + name
-
 class Activator(object):
     def __init__(self):
         self.accel_group = gtk.AccelGroup()
@@ -14,12 +11,15 @@ class Activator(object):
 
     def map(self, name, accel):
         key, modifier = km = gtk.accelerator_parse(accel)
-        gtk.accel_map_change_entry(get_accel_path(name), key, modifier, True)
+        if key == 0:
+            import warnings
+            warnings.warn("Can't parse %s" % accel)
+
+        self.accel_group.connect_group(key, modifier, gtk.ACCEL_VISIBLE, self.activate)
         self.shortcuts.setdefault(km, []).append(name)
 
     def bind(self, name, desc, callback, *args):
         self.actions[name] = (desc, callback, args)
-        self.accel_group.connect_by_path(get_accel_path(name), self.activate)
 
     def bind_accel(self, name, desc, accel, callback, *args):
         self.bind(name, desc, callback, *args)
@@ -31,4 +31,15 @@ class Activator(object):
     def activate(self, group, window, key, modifier):
         cb, args = self.get_callback_and_args(key, modifier)
         result = cb(*args)
+        return result is None or result
+
+class ContextActivator(Activator):
+    def __init__(self, context_resolver):
+        Activator.__init__(self)
+        self.context_resolver = context_resolver
+
+    def activate(self, group, window, key, modifier):
+        cb, args = self.get_callback_and_args(key, modifier)
+        ctx = self.context_resolver.get_context(window)
+        result = cb(ctx, *args)
         return result is None or result
