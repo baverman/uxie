@@ -21,8 +21,9 @@ class InteractiveSearch(object):
     def on_key_press(self, widget, event):
         t = gtk.gdk.keyval_to_unicode(event.keyval)
         is_active = self.is_active()
+        printable_mask = ( event.state | gtk.gdk.SHIFT_MASK ) == gtk.gdk.SHIFT_MASK
 
-        if t or (is_active and event.keyval == gtk.keysyms.BackSpace):
+        if (t and printable_mask) or (is_active and event.keyval == gtk.keysyms.BackSpace):
             self.delegate(event)
             return True
 
@@ -52,6 +53,7 @@ class InteractiveSearch(object):
         if not self.window:
             self.window = gtk.Window(gtk.WINDOW_POPUP)
             self.window.set_type_hint(gtk.gdk.WINDOW_TYPE_HINT_UTILITY)
+            #self.window.set_modal(True)
             self.window.set_border_width(3)
 
             frame = gtk.Frame()

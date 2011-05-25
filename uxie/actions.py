@@ -39,6 +39,18 @@ class ContextActivator(Activator):
         Activator.__init__(self)
         self.context_resolver = context_resolver
 
+    def attach(self, window):
+        window.add_accel_group(self.accel_group)
+        window.connect('key-press-event', self.on_key_press)
+
+    def on_key_press(self, window, event):
+        w = window.get_focus()
+        if w:
+            if w.event(event):
+                return True
+
+        return False
+
     def get_ctx_and_name(self, name):
         ctx, _, name = name.partition('/')
         return ctx, name
