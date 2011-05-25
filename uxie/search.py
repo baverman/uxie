@@ -3,29 +3,49 @@ import gtk
 from .utils import send_focus_change
 
 class InteractiveSearch(object):
-    def __init__(self):
+    def __init__(self, search_callback):
         self.window = None
         self.widget = None
         self.entry = None
+        self.search_callback = search_callback
 
     def attach(self, widget):
         self.widget = widget
         self.widget.connect('key-press-event', self.on_key_press)
+        self.widget.connect('focus-out-event', self.on_focus_out)
+
+    def on_focus_out(self, view, event):
+        if self.is_active():
+            self.window.hide()
 
     def on_key_press(self, widget, event):
         t = gtk.gdk.keyval_to_unicode(event.keyval)
-        if t or event.keyval == gtk.keysyms.BackSpace:
+        is_active = self.is_active()
+
+        if t or (is_active and event.keyval == gtk.keysyms.BackSpace):
             self.delegate(event)
             return True
 
-        if event.keyval == gtk.keysyms.Escape:
-            self.window.hide()
-            return True
+        if is_active:
+            if event.keyval == gtk.keysyms.Escape:
+                self.window.hide()
+                return True
 
-        if event.keyval == gtk.keysyms.Return:
-            self.window.hide()
+            if event.keyval == gtk.keysyms.Up:
+                self.search_callback(self.entry.get_text(), -1, True)
+                return True
+
+            if event.keyval == gtk.keysyms.Down:
+                self.search_callback(self.entry.get_text(), 1, True)
+                return True
+
+            if event.keyval == gtk.keysyms.Return:
+                self.window.hide()
 
         return False
+
+    def on_entry_changed(self, entry):
+        self.search_callback(entry.get_text(), 1, False)
 
     def ensure_window_created(self):
         top = self.widget.get_toplevel()
@@ -40,9 +60,11 @@ class InteractiveSearch(object):
             frame.show()
 
             self.entry = gtk.Entry()
+            self.entry.connect('changed', self.on_entry_changed)
             frame.add(self.entry)
             self.entry.show()
             self.entry.realize()
+
 
         if top.has_group():
             top.get_group().add_window(self.window)
@@ -52,8 +74,7 @@ class InteractiveSearch(object):
         self.window.set_screen(top.get_screen())
 
     def is_active(self):
-        self.ensure_window_created()
-        return self.window.get_visible()
+        return self.window and self.window.get_visible()
 
     def delegate(self, event):
         self.ensure_window_created()
