@@ -40,6 +40,12 @@ def refresh_gui():
     while gtk.events_pending():
         gtk.main_iteration_do(block=False)
 
+def send_focus_change(widget, is_in):
+    event = gtk.gdk.Event(gtk.gdk.FOCUS_CHANGE)
+    event.window = widget.window
+    event.in_ = is_in
+    widget.send_focus_change(event)
+
 
 class BuilderAware(object):
     def __init__(self, glade_file):
