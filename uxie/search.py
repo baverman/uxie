@@ -53,7 +53,6 @@ class InteractiveSearch(object):
         if not self.window:
             self.window = gtk.Window(gtk.WINDOW_POPUP)
             self.window.set_type_hint(gtk.gdk.WINDOW_TYPE_HINT_UTILITY)
-            #self.window.set_modal(True)
             self.window.set_border_width(3)
 
             frame = gtk.Frame()
