@@ -34,6 +34,25 @@ class Activator(object):
         result = cb(*args)
         return result is None or result
 
+class ContextHolder():
+    def __init__(self, activator, context):
+        self.activator = activator
+        self.context = context
+
+    def map(self, name, accel, priority=0):
+        self.activator.map(self.context, name, accel, priority)
+
+    def bind(self, name, desc, callback, *args):
+        self.activator.bind(self.context, name, desc, callback, *args)
+
+    def bind_accel(self, name, desc, accel, callback, priority=0, *args):
+        self.activator.bind_accel(self.context, name, desc, accel, callback, priority, *args)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
 
 class ContextActivator(Activator):
     def __init__(self, context_resolver):
@@ -52,6 +71,9 @@ class ContextActivator(Activator):
                 return True
 
         return False
+
+    def on(self, context):
+        return ContextHolder(self, context)
 
     def bind_accel(self, ctx, name, desc, accel, callback, priority=0, *args):
         self.bind(ctx, name, desc, callback, *args)
