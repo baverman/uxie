@@ -16,15 +16,15 @@ class FeedbackManager(object):
         feedbacks = sorted(self.feedbacks[window])
 
         win = window.window
-        x, y, w, h, _ = win.get_geometry()
-        x, y = win.get_origin()
+        _, _, x, y, _ = win.get_geometry()
 
-        y = y + h
         for f in feedbacks:
-            mw, mh = f.get_size()
-            f.window.move(x + w - mw, y - mh)
-            f.window.show()
+            if f.window.window.get_parent() != win:
+                f.window.window.reparent(win, 0, 0)
 
+            mw, mh = f.get_size()
+            f.window.move(x - mw, y - mh)
+            f.window.show()
             y -= mh + 2
 
 

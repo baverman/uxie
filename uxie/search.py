@@ -12,11 +12,6 @@ class InteractiveSearch(object):
     def attach(self, widget):
         self.widget = widget
         self.widget.connect('key-press-event', self.on_key_press)
-        self.widget.connect('focus-out-event', self.on_focus_out)
-
-    def on_focus_out(self, view, event):
-        if self.is_active():
-            self.window.hide()
 
     def on_key_press(self, widget, event):
         t = gtk.gdk.keyval_to_unicode(event.keyval)
@@ -81,13 +76,15 @@ class InteractiveSearch(object):
         self.ensure_window_created()
         if not self.window.get_visible():
             win = self.widget.window
-            x, y, w, h, _ = win.get_geometry()
-            x, y = win.get_origin()
+            if self.window.window.get_parent() != win:
+                self.window.window.reparent(win, 0, 0)
+
+            _, _, x, y, _ = win.get_geometry()
             mw, mh = self.window.get_size()
 
             self.entry.set_text('')
 
-            self.window.move(x + w - mw, y + h - mh)
+            self.window.move(x - mw, y - mh)
             self.window.show()
 
             send_focus_change(self.entry, True)
