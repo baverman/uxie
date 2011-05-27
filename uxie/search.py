@@ -14,31 +14,38 @@ class InteractiveSearch(object):
         self.widget.connect('key-press-event', self.on_key_press)
 
     def on_key_press(self, widget, event):
-        t = gtk.gdk.keyval_to_unicode(event.keyval)
-        is_active = self.is_active()
-        printable_mask = ( event.state | gtk.gdk.SHIFT_MASK ) == gtk.gdk.SHIFT_MASK
+        state = event.state
+        keyval = event.keyval
 
-        if (t and printable_mask) or (is_active and event.keyval == gtk.keysyms.BackSpace):
+        t = gtk.gdk.keyval_to_unicode(keyval)
+        is_active = self.is_active()
+        printable_mask = ( state | gtk.gdk.SHIFT_MASK ) == gtk.gdk.SHIFT_MASK
+
+        if (t and printable_mask) or (is_active and keyval == gtk.keysyms.BackSpace):
             self.delegate(event)
             return True
 
-        if is_active:
-            if event.keyval == gtk.keysyms.Escape:
+        if not is_active:
+            return False
+
+        if not state:
+            if keyval == gtk.keysyms.Escape:
                 self.window.hide()
                 return True
 
-            if event.keyval == gtk.keysyms.Up:
+            if keyval == gtk.keysyms.Up:
                 self.search_callback(self.entry.get_text(), -1, True)
                 return True
 
-            if event.keyval == gtk.keysyms.Down:
+            if keyval == gtk.keysyms.Down:
                 self.search_callback(self.entry.get_text(), 1, True)
                 return True
 
-            if event.keyval == gtk.keysyms.Return:
+            if keyval == gtk.keysyms.Return:
                 self.window.hide()
+                return False
 
-        return False
+        return True
 
     def on_entry_changed(self, entry):
         self.search_callback(entry.get_text(), 1, False)
