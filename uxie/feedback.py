@@ -1,31 +1,49 @@
 import weakref
 import gtk
+import glib
 
 from .misc import FlatBox
+
+def timeout(feedback):
+    feedback = feedback()
+    if feedback and feedback.is_active():
+        feedback.cancel()
+
+    return False
 
 
 class FeedbackManager(object):
     def __init__(self):
         self.feedbacks = weakref.WeakKeyDictionary()
 
-    def add_feedback(self, window, feedback, timeout=-1):
+    def add_feedback(self, window, feedback):
         self.feedbacks.setdefault(window, []).append(feedback)
         self.arrange(window)
+        return feedback
 
     def arrange(self, window):
-        feedbacks = sorted(self.feedbacks[window])
+        feedbacks = self.feedbacks[window][:] = sorted([
+            r for r in self.feedbacks[window] if r.is_active()])
 
         win = window.window
         _, _, x, y, _ = win.get_geometry()
 
         for f in feedbacks:
-            if f.window.window.get_parent() != win:
-                f.window.window.reparent(win, 0, 0)
-
             mw, mh = f.get_size()
-            f.window.move(x - mw, y - mh)
-            f.window.show()
+            f.show(win, x - mw, y - mh)
             y -= mh + 2
+
+
+class FeedbackHelper(object):
+    def __init__(self, fm, window):
+        self.window = window
+        self.fm = fm
+
+    def show(self, text, category=None, timeout=None):
+        return self.fm.add_feedback(self.window, TextFeedback(text, category, timeout))
+
+    def show_widget(self, widget, priority=0, timeout=0):
+        return self.fm.add_feedback(self.window, WidgetFeedback(widget, priority, timeout))
 
 
 class Feedback(object):
@@ -48,10 +66,28 @@ class Feedback(object):
         self.window.resize(*self.window.size_request())
         return self.window.get_size()
 
+    def show(self, window, x, y):
+        if self.window.window.get_parent() != window:
+            self.window.window.reparent(window, 0, 0)
+
+        if not self.window.get_visible() and self.timeout > 0:
+            glib.timeout_add(self.timeout, timeout, weakref.ref(self))
+
+        self.window.move(x, y)
+        self.window.show()
+
+    def cancel(self):
+        self.window.destroy()
+        self.window = None
+
+    def is_active(self):
+        return self.window is not None
+
 
 class WidgetFeedback(Feedback):
-    def __init__(self, widget, priority=0):
+    def __init__(self, widget, priority=0, timeout=0):
         self.priority = priority
+        self.timeout = timeout
 
         self.window = self.create_window()
         widget.show_all()
@@ -67,7 +103,12 @@ class TextFeedback(WidgetFeedback):
         'error': '#C55',
     }
 
-    def __init__(self, text, category='info'):
+    def __init__(self, text, category=None, timeout=None):
+        category = category or 'info'
+
+        if timeout is None:
+            timeout = max(1500, 500 + len(text)*100)
+
         box = gtk.HBox()
         box.pack_start(FlatBox(5, TextFeedback.COLORS[category]), False, True)
 
@@ -75,4 +116,4 @@ class TextFeedback(WidgetFeedback):
         label.set_padding(7, 5)
         box.pack_start(label, True, True)
 
-        WidgetFeedback.__init__(self, box, 0)
+        WidgetFeedback.__init__(self, box, 0, timeout)
