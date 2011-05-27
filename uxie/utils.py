@@ -45,18 +45,3 @@ def send_focus_change(widget, is_in):
     event.window = widget.window
     event.in_ = is_in
     widget.send_focus_change(event)
-
-
-class BuilderAware(object):
-    def __init__(self, glade_file):
-        self.gtk_builder = gtk.Builder()
-        self.gtk_builder.add_from_file(glade_file)
-        self.gtk_builder.connect_signals(self)
-
-    def __getattr__(self, name):
-        obj = self.gtk_builder.get_object(name)
-        if not obj:
-            raise AttributeError('Builder have no %s object' % name)
-
-        setattr(self, name, obj)
-        return obj
