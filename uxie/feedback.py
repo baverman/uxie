@@ -1,3 +1,4 @@
+import time
 import weakref
 import gtk
 import glib
@@ -72,13 +73,15 @@ class Feedback(object):
 
         if not self.window.get_visible() and self.timeout > 0:
             glib.timeout_add(self.timeout, timeout, weakref.ref(self))
+            self.start = time.time()
 
         self.window.move(x, y)
         self.window.show()
 
     def cancel(self):
-        self.window.destroy()
-        self.window = None
+        if self.window:
+            self.window.destroy()
+            self.window = None
 
     def is_active(self):
         return self.window is not None
@@ -107,7 +110,7 @@ class TextFeedback(WidgetFeedback):
         category = category or 'info'
 
         if timeout is None:
-            timeout = max(1500, 500 + len(text)*100)
+            timeout = max(1500, 500 + len(text)*50)
 
         box = gtk.HBox()
         box.pack_start(FlatBox(5, TextFeedback.COLORS[category]), False, True)
