@@ -102,15 +102,14 @@ class ContextActivator(Activator):
             self._add_shortcut(km, ctx, name, -priority)
 
     def activate(self, group, window, key, modifier):
-        _, ctx, name = self.shortcuts[(key, modifier)][0]
-        ctx_obj = self.get_context(window, ctx)
+        for _, ctx, name in self.shortcuts[(key, modifier)]:
+            ctx_obj = self.get_context(window, ctx)
+            if ctx_obj:
+                cb, args = self.actions[ctx][name][1:]
+                result = cb(ctx_obj, *args)
+                return result is None or result
 
-        if ctx_obj:
-            cb, args = self.actions[ctx][name][1:]
-            result = cb(ctx_obj, *args)
-            return result is None or result
-        else:
-            return False
+        return False
 
     def _find_context(self, ctx, cache):
         try:
