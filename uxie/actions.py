@@ -55,10 +55,10 @@ class ContextHolder():
         pass
 
 class ContextActivator(Activator):
-    def __init__(self, context_resolver):
+    def __init__(self):
         Activator.__init__(self)
-        self.context_resolver = context_resolver
         self.generic_shortcuts = {}
+        self.contexts = {}
 
     def attach(self, window):
         window.add_accel_group(self.accel_group)
@@ -103,7 +103,7 @@ class ContextActivator(Activator):
 
     def activate(self, group, window, key, modifier):
         _, ctx, name = self.shortcuts[(key, modifier)][0]
-        ctx_obj = self.context_resolver.get_context(window, ctx)
+        ctx_obj = self.get_context(window, ctx)
 
         if ctx_obj:
             cb, args = self.actions[ctx][name][1:]
@@ -111,3 +111,38 @@ class ContextActivator(Activator):
             return result is None or result
         else:
             return False
+
+    def _find_context(self, ctx, cache):
+        try:
+            return cache[ctx]
+        except KeyError:
+            pass
+
+        try:
+            depends, callback = self.contexts[ctx]
+        except KeyError:
+            print 'There are no any registered providers for [%s] context' % ctx
+            return None
+
+        if depends:
+            args = []
+            for dctx in depends:
+                d = self._find_context(dctx, cache)
+                if not d:
+                    result = None
+                    break
+
+                args.append(d)
+            else:
+                result = callback(*args)
+        else:
+            result = callback()
+
+        cache[ctx] = result
+        return result
+
+    def get_context(self, window, ctx):
+        return self._find_context(ctx, {'window':window})
+
+    def add_context(self, ctx, depends, callback):
+        self.contexts[ctx] = depends, callback
