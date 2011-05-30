@@ -144,4 +144,6 @@ class ContextActivator(Activator):
         return self._find_context(ctx, {'window':window})
 
     def add_context(self, ctx, depends, callback):
+        if isinstance(depends, str):
+            depends = (depends,)
         self.contexts[ctx] = depends, callback
