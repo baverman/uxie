@@ -45,3 +45,9 @@ def send_focus_change(widget, is_in):
     event.window = widget.window
     event.in_ = is_in
     widget.send_focus_change(event)
+
+def human_size(num):
+    for x in ['bytes','KB','MB','GB','TB']:
+        if num < 1024.0:
+            return "%g %s" % (round(num, 1), x)
+        num /= 1024.0

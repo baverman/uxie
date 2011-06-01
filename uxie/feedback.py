@@ -91,12 +91,13 @@ class WidgetFeedback(Feedback):
     def __init__(self, widget, priority=0, timeout=0):
         self.priority = priority
         self.timeout = timeout
+        self.widget = widget
 
         self.window = self.create_window()
         widget.show_all()
         self.window.add(widget)
         self.window.realize()
-
+        widget.realize()
 
 class TextFeedback(WidgetFeedback):
     COLORS = {

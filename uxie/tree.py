@@ -1,8 +1,14 @@
 from bisect import bisect
-import gtk
+import gtk, gobject
 
 class SelectionListStore(gtk.ListStore):
-    __gsignals__ = {'row-deleted': 'override'}
+    __gsignals__ = {
+        'row-deleted': 'override',
+        'selection-changed': (
+            gobject.SIGNAL_RUN_LAST | gobject.SIGNAL_ACTION,
+            gobject.TYPE_NONE, (object,)
+        ),
+    }
 
     def __init__(self, *args):
         gtk.ListStore.__init__(self, *args)
@@ -30,6 +36,8 @@ class SelectionListStore(gtk.ListStore):
         self.ordered_selection.insert(idx, path)
         self.selection[path] = True
 
+        self.emit('selection-changed', self.selection)
+
     def unselect(self, path):
         if path not in self.selection:
             return
@@ -38,6 +46,8 @@ class SelectionListStore(gtk.ListStore):
         self.ordered_selection.remove(path)
         self.selected_all = False
 
+        self.emit('selection-changed', self.selection)
+
     def select_all(self):
         self.selected_all = True
         for r in self:
@@ -45,10 +55,14 @@ class SelectionListStore(gtk.ListStore):
 
         self.ordered_selection[:] = list(sorted(self.selection))
 
+        self.emit('selection-changed', self.selection)
+
     def clear_selection(self):
         self.selected_all = False
         self.selection.clear()
         self.ordered_selection[:] = []
+
+        self.emit('selection-changed', self.selection)
 
     def do_row_deleted(self, path):
         if not self.selection:
@@ -61,3 +75,5 @@ class SelectionListStore(gtk.ListStore):
             del self.selection[path]
             self.selection[newpath] = True
             self.ordered_selection[idx] = newpath
+
+        self.emit('selection-changed', self.selection)
