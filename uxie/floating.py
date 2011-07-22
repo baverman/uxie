@@ -5,33 +5,40 @@ import glib
 
 from .misc import FlatBox
 
-def timeout(feedback):
-    feedback = feedback()
-    if feedback and feedback.is_active():
-        feedback.cancel()
+def timeout(floating):
+    floating = floating()
+    if floating and floating.is_active():
+        floating.cancel()
 
     return False
 
 
-class FeedbackManager(object):
+class Manager(object):
     def __init__(self):
-        self.feedbacks = weakref.WeakKeyDictionary()
+        self.floatings = {}
 
-    def add_feedback(self, window, feedback):
-        self.feedbacks.setdefault(window, []).append(feedback)
-        self.arrange(window)
-        return feedback
+    def add(self, window, floating):
+        top = window.get_toplevel()
+        print 'before', self.floatings.get(top, None)
+        self.floatings.setdefault(top, []).append((floating, window))
+        print 'after', self.floatings[top]
+        self.arrange(top)
+        return floating
 
     def arrange(self, window):
-        feedbacks = self.feedbacks[window][:] = sorted([
-            r for r in self.feedbacks[window] if r.is_active()])
+        floatings = self.floatings[window][:] = sorted([
+            r for r in self.floatings[window] if r[0].is_active()])
+        print 'arr', floatings, self.floatings[window]
 
-        win = window.window
-        _, _, x, y, _ = win.get_geometry()
+        _, _, x, y, _ = window.get_geometry()
 
-        for f in feedbacks:
+        for f, fwindow in floatings:
+            if not fwindow.is_viewable():
+                print 'not vu', fwindow
+                continue
+            #print window, fwindow, fwindow.get_origin()
             mw, mh = f.get_size()
-            f.show(win, x - mw, y - mh)
+            f.show(fwindow, x - mw, y - mh)
             y -= mh + 2
 
 
@@ -121,3 +128,55 @@ class TextFeedback(WidgetFeedback):
         box.pack_start(label, True, True)
 
         WidgetFeedback.__init__(self, box, 0, timeout)
+
+class FloatBox(gtk.Container):
+    __gsignals__ = {
+        'size-request': 'override',
+        'size-allocate': 'override',
+    }
+
+    def __init__(self):
+        gtk.Container.__init__(self)
+        self.set_has_window(False)
+        self.child = None
+        self.floats = {}
+
+    def add(self, widget):
+        if not self.child:
+            self.child = widget
+        else:
+            self.floats[widget] = (0, 0)
+
+        widget.set_parent(self)
+
+    def do_remove(self, widget):
+        widget.unparent()
+        if widget is self.child:
+            self.child = None
+        else:
+            del self.floats[widget]
+
+    def move(self, widget, x, y):
+        self.floats[widget] = (x, y)
+
+    def do_size_request(self, req):
+        if self.child:
+            w, h = self.child.size_request()
+            req.width = w
+            req.height = h
+
+    def do_size_allocate(self, allocation):
+        self.allocation = allocation
+        if self.child:
+            self.child.size_allocate(allocation)
+
+            for f, (x, y) in self.floats.iteritems():
+                w, h = f.size_request()
+                calloc = gtk.gdk.Rectangle(allocation.x + x, allocation.y + y, w, h)
+                f.size_allocate(calloc)
+
+    def do_forall(self, int, callback, data):
+        if self.child:
+            callback(self.child, data)
+            for f in list(self.floats):
+                callback(f, data)

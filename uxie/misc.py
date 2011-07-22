@@ -36,3 +36,21 @@ class BuilderAware(object):
 
         setattr(self, name, obj)
         return obj
+
+
+class InputDialog(gtk.Dialog):
+    def __init__(self, title=None, parent=None, flags=0, buttons=None):
+        if flags is None:
+            flags = gtk.DIALOG_MODAL | gtk.DIALOG_DESTROY_WITH_PARENT
+
+        if buttons is None:
+            buttons = (gtk.STOCK_CANCEL, gtk.RESPONSE_REJECT,
+                gtk.STOCK_OK, gtk.RESPONSE_ACCEPT)
+
+        gtk.Dialog.__init__(self, title, parent, flags, buttons)
+        self.set_default_response(gtk.RESPONSE_ACCEPT)
+
+        self.entry = gtk.Entry()
+        self.entry.set_activates_default(True)
+        self.vbox.pack_start(self.entry)
+        self.entry.show()
