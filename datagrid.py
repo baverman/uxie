@@ -13,7 +13,7 @@ w.add(sw)
 model = [{'id':i, 'name':'name%d' % i, 'desc': 'description %d' % i } for i in xrange(100)]
 
 renderer = RowRenderer()
-renderer.add_column(TextColumn('id'), pixels=20)
+renderer.add_column(TextColumn('id'), pixels=30)
 renderer.add_column(TextColumn('name'), percents=30, chars=10)
 renderer.add_column(TextColumn('desc'), percents=70, chars=20)
 

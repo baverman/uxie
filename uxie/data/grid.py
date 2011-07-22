@@ -140,8 +140,8 @@ class Grid(gtk.EventBox):
                 y += rh
                 i += 1
 
-                cr.move_to(0.0, y + 0.5)
-                cr.line_to(event.area.width+0.5, y + 0.5)
+                cr.move_to(0, y + 0.5)
+                cr.line_to(event.area.width, y + 0.5)
                 cr.stroke()
                 y += 1
 
@@ -149,8 +149,8 @@ class Grid(gtk.EventBox):
             x = 0.5
             for i in range(len(self.renderer.widths) - 1):
                 x += self.renderer.calculated_widths[i] + 1
-                cr.move_to(x, 0.0)
-                cr.line_to(x, y + 0.5)
+                cr.move_to(x, 0)
+                cr.line_to(x, y)
                 cr.stroke()
 
 
