@@ -26,6 +26,7 @@ class RowRenderer(object):
             r.render(window, widget, rect, rect, earea, flags)
 
             x += w
+            x += 1
 
     def get_size(self):
         return self.width, self.height
@@ -50,7 +51,7 @@ class RowRenderer(object):
                     fixed_width += pi
                     self.calculated_widths[i] = pi
 
-            remain = max_width - fixed_width
+            remain = max_width - fixed_width - len(self.widths) + 1
             for i, (pi, pr) in enumerate(self.widths):
                 if pr is not None:
                     if pi is None:
@@ -62,11 +63,13 @@ class RowRenderer(object):
 
 class Column(object):
     def get_renderer(self):
-        return gtk.CellRendererText()
+        r = gtk.CellRendererText()
+        r.props.ypad = 4
+        r.props.xpad = 5
+        return r
 
     def set_attributes(self, renderer, row):
         renderer.props.text = self.to_string(row)
-
 
 class TextColumn(Column):
     def __init__(self, name):
@@ -123,6 +126,11 @@ class Grid(gtk.EventBox):
             self.renderer.set_max_width(self)
             rw, rh = self.renderer.get_size()
 
+            cr = self.window.cairo_create()
+            cr.set_source_rgb(0.8, 0.8, 0.8)
+            cr.set_line_width(1.0)
+            cr.set_dash([5.0, 2.0])
+
             x, y = 0, 0
             maxy = self.allocation.height
             i = 0
@@ -131,6 +139,20 @@ class Grid(gtk.EventBox):
                 self.renderer.draw(row, x, y, self.window, self, event.area, 0)
                 y += rh
                 i += 1
+
+                cr.move_to(0.0, y + 0.5)
+                cr.line_to(event.area.width+0.5, y + 0.5)
+                cr.stroke()
+                y += 1
+
+            y -= 1
+            x = 0.5
+            for i in range(len(self.renderer.widths) - 1):
+                x += self.renderer.calculated_widths[i] + 1
+                cr.move_to(x, 0.0)
+                cr.line_to(x, y + 0.5)
+                cr.stroke()
+
 
         return True
 
