@@ -28,21 +28,37 @@ class RowRenderer(object):
             x += w
             x += 1
 
-    def get_size(self):
-        return self.width, self.height
-
-    def set_max_width(self, widget, max_width):
-        try:
-            self.renderers
-        except:
-            self.renderers = []
-            for c in self.columns:
-                self.renderers.append(c.get_renderer())
-
+    def get_size(self, widget):
         if self.height is None:
+            try:
+                self.renderers
+            except:
+                self.renderers = []
+                for c in self.columns:
+                    self.renderers.append(c.get_renderer())
+
             self.height = max(r.get_size(widget)[3] for r in self.renderers)
 
-        if self.last_max_width != max_width or max_width < 0:
+        return self.width, self.height
+
+    def get_minimal_width(self):
+        try:
+            return self._minimal_width
+        except AttributeError:
+            pass
+
+        w = 0
+        for i, (pi, pr) in enumerate(self.widths):
+            if pr is None:
+                w += pi
+            else:
+                w += self.minimal_column_width
+
+        self._minimal_width = w
+        return w
+
+    def set_max_width(self, max_width):
+        if self.last_max_width != max_width:
             fixed_width = 0
             self.calculated_widths.clear()
             for i, (pi, pr) in enumerate(self.widths):
@@ -59,9 +75,7 @@ class RowRenderer(object):
                     self.calculated_widths[i] = max(remain*pr/100, pi)
 
             self.width = sum(self.calculated_widths.values())
-
-            if max_width >= 0:
-                self.last_max_width = max_width
+            self.last_max_width = max_width
 
 
 class Column(object):
@@ -107,16 +121,15 @@ class Grid(gtk.EventBox):
         req.width = 500
         req.height = 500
         if self.renderer:
-            self.renderer.set_max_width(self, -1)
-            req.width, h = self.renderer.get_size()
-
+            req.width = self.renderer.get_minimal_width()
             if self.model:
+                _, h = self.renderer.get_size(self)
                 cnt = len(self.model)
                 req.height = cnt*h + cnt - 1
 
     def refresh_scrolls(self):
-        self.renderer.set_max_width(self, self.allocation.width)
-        w, h = self.renderer.get_size()
+        self.renderer.set_max_width(self.allocation.width)
+        w, h = self.renderer.get_size(self)
         cnt = len(self.model)
         vcnt = self.allocation.height / (h + 1)
 
@@ -145,7 +158,7 @@ class Grid(gtk.EventBox):
 
     def do_expose_event(self, event):
         if self.window:
-            rw, rh = self.renderer.get_size()
+            rw, rh = self.renderer.get_size(self)
 
             cr = self.window.cairo_create()
             cr.set_source_rgb(0.8, 0.8, 0.8)
