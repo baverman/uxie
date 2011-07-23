@@ -120,10 +120,10 @@ class Grid(gtk.EventBox):
         cnt = len(self.model)
         vcnt = self.allocation.height / (h + 1)
 
-        self._vadj.configure(0, 0, cnt, 1.0, vcnt, vcnt)
+        self._vadj.configure(min(self._vadj.value, cnt), 0, cnt, 1.0, vcnt, vcnt)
 
-        self._hadj.configure(0, 0, w, self.allocation.width*0.1, self.allocation.width*0.9,
-            self.allocation.width)
+        self._hadj.configure(min(self._hadj.value, w), 0, w,
+            self.allocation.width*0.1, self.allocation.width*0.9, self.allocation.width)
 
     def do_size_allocate(self, allocation):
         self.allocation = allocation
@@ -178,7 +178,6 @@ class Grid(gtk.EventBox):
                 cr.move_to(x, 0)
                 cr.line_to(x, y)
                 cr.stroke()
-
 
         return True
 
