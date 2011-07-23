@@ -10,7 +10,7 @@ class RowRenderer(object):
         self.height = None
         self.last_max_width = None
         self.minimal_column_width = 10
-        self.calculated_widths = {}
+        self.calculated_widths = []
 
     def add_column(self, column, pixels=None, percents=None, chars=None):
         self.columns.append(column)
@@ -25,8 +25,7 @@ class RowRenderer(object):
             rect = (x, y, w, self.height,)
             r.render(window, widget, rect, rect, earea, flags)
 
-            x += w
-            x += 1
+            x += w + 1
 
     def get_size(self, widget):
         if self.height is None:
@@ -60,7 +59,7 @@ class RowRenderer(object):
     def set_max_width(self, max_width):
         if self.last_max_width != max_width:
             fixed_width = 0
-            self.calculated_widths.clear()
+            self.calculated_widths[:] = [0] * len(self.columns)
             for i, (pi, pr) in enumerate(self.widths):
                 if pr is None:
                     fixed_width += pi
@@ -74,7 +73,7 @@ class RowRenderer(object):
 
                     self.calculated_widths[i] = max(remain*pr/100, pi)
 
-            self.width = sum(self.calculated_widths.values())
+            self.width = sum(self.calculated_widths)
             self.last_max_width = max_width
 
 
@@ -186,8 +185,8 @@ class Grid(gtk.EventBox):
 
             y -= 1
             x += 0.5
-            for i in range(len(self.renderer.widths) - 1):
-                x += self.renderer.calculated_widths[i] + 1
+            for w in self.renderer.calculated_widths[:-1]:
+                x += w + 1
                 cr.move_to(x, 0)
                 cr.line_to(x, y)
                 cr.stroke()
