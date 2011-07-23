@@ -31,7 +31,7 @@ class RowRenderer(object):
     def get_size(self):
         return self.width, self.height
 
-    def set_max_width(self, widget):
+    def set_max_width(self, widget, max_width):
         try:
             self.renderers
         except:
@@ -42,8 +42,7 @@ class RowRenderer(object):
         if self.height is None:
             self.height = max(r.get_size(widget)[3] for r in self.renderers)
 
-        max_width = widget.allocation.width
-        if self.last_max_width != max_width:
+        if self.last_max_width != max_width or max_width < 0:
             fixed_width = 0
             self.calculated_widths.clear()
             for i, (pi, pr) in enumerate(self.widths):
@@ -60,6 +59,10 @@ class RowRenderer(object):
                     self.calculated_widths[i] = max(remain*pr/100, pi)
 
             self.width = sum(self.calculated_widths.values())
+
+            if max_width >= 0:
+                self.last_max_width = max_width
+
 
 class Column(object):
     def get_renderer(self):
@@ -101,29 +104,47 @@ class Grid(gtk.EventBox):
         self.renderer = None
 
     def do_size_request(self, req):
-        if self.model:
-            req.width = 500
-            req.height = 500
+        req.width = 500
+        req.height = 500
+        if self.renderer:
+            self.renderer.set_max_width(self, -1)
+            req.width, h = self.renderer.get_size()
+
+            if self.model:
+                cnt = len(self.model)
+                req.height = cnt*h + cnt - 1
+
+    def refresh_scrolls(self):
+        self.renderer.set_max_width(self, self.allocation.width)
+        w, h = self.renderer.get_size()
+        cnt = len(self.model)
+        vcnt = self.allocation.height / (h + 1)
+
+        self._vadj.configure(0, 0, cnt, 1.0, vcnt, vcnt)
+
+        self._hadj.configure(0, 0, w, self.allocation.width*0.1, self.allocation.width*0.9,
+            self.allocation.width)
 
     def do_size_allocate(self, allocation):
         self.allocation = allocation
         if self.window:
             self.window.move_resize(*allocation)
 
+        self.refresh_scrolls()
+
     def do_set_scroll_adjustments(self, h_adjustment, v_adjustment):
         if h_adjustment:
             self._hscroll_handler_id = h_adjustment.connect(
-                "value-changed", self.hscroll_value_changed)
+                "value-changed", self.scroll_value_changed)
             self._hadj = h_adjustment
 
         if v_adjustment:
             self._vscroll_handler_id = v_adjustment.connect(
-                "value-changed", self.vscroll_value_changed)
+                "value-changed", self.scroll_value_changed)
             self._vadj = v_adjustment
 
     def do_expose_event(self, event):
         if self.window:
-            self.renderer.set_max_width(self)
             rw, rh = self.renderer.get_size()
 
             cr = self.window.cairo_create()
@@ -131,22 +152,27 @@ class Grid(gtk.EventBox):
             cr.set_line_width(1.0)
             cr.set_dash([5.0, 2.0])
 
-            x, y = 0, 0
+            y = 0
+            x = -int(self._hadj.value)
             maxy = self.allocation.height
-            i = 0
+            i = int(self._vadj.value)
             while y < maxy:
-                row = self.model[i]
+                try:
+                    row = self.model[i]
+                except IndexError:
+                    break
+
                 self.renderer.draw(row, x, y, self.window, self, event.area, 0)
                 y += rh
                 i += 1
 
-                cr.move_to(0, y + 0.5)
+                cr.move_to(x, y + 0.5)
                 cr.line_to(event.area.width, y + 0.5)
                 cr.stroke()
                 y += 1
 
             y -= 1
-            x = 0.5
+            x += 0.5
             for i in range(len(self.renderer.widths) - 1):
                 x += self.renderer.calculated_widths[i] + 1
                 cr.move_to(x, 0)
@@ -156,10 +182,7 @@ class Grid(gtk.EventBox):
 
         return True
 
-    def hscroll_value_changed(self, *args):
-        self.queue_draw()
-
-    def vscroll_value_changed(self, *args):
+    def scroll_value_changed(self, *args):
         self.queue_draw()
 
     def do_realize(self):
