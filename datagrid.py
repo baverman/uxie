@@ -21,6 +21,7 @@ grid = Grid()
 grid.renderer = renderer
 grid.model = model
 sw.add(grid)
+grid.set_cursor(0, 0)
 
 w.show_all()
 

@@ -1,5 +1,6 @@
 import gtk
 import gobject
+from gtk.keysyms import Down, Up
 
 class RowRenderer(object):
     def __init__(self):
@@ -11,19 +12,39 @@ class RowRenderer(object):
         self.last_max_width = None
         self.minimal_column_width = 10
         self.calculated_widths = []
+        self.editables = {}
 
     def add_column(self, column, pixels=None, percents=None, chars=None):
         self.columns.append(column)
         self.widths.append((pixels if chars is None else chars*10, percents))
 
-    def draw(self, row, x, y, window, widget, earea, flags):
+    def get_editable(self, col, renderer, row):
+        try:
+            e = self.editables[col]
+        except KeyError:
+            e = self.editables[col] = col.get_editable(renderer)
+
+        return e
+
+    def draw(self, row, x, y, window, widget, earea, flags, cursor):
         for i, r in enumerate(self.renderers):
             c = self.columns[i]
             w = self.calculated_widths[i]
             c.set_attributes(r, row)
 
-            rect = (x, y, w, self.height,)
-            r.render(window, widget, rect, rect, earea, flags)
+            rect = (x, y, w, self.height)
+            if cursor == i :
+                e = self.get_editable(c, r, row)
+                c.set_editable(e, row)
+                if e.get_parent() is not widget:
+                    e.unparent()
+                    e.set_parent(widget)
+                    e.size_request()
+
+                e.size_allocate(rect)
+                e.show()
+            else:
+                r.render(window, widget, rect, rect, earea, flags)
 
             x += w + 1
 
@@ -84,8 +105,17 @@ class Column(object):
         r.props.xpad = 5
         return r
 
+    def get_editable(self, renderer):
+        entry = gtk.Entry()
+        entry.set_has_frame(False)
+        return entry
+
     def set_attributes(self, renderer, row):
         renderer.props.text = self.to_string(row)
+
+    def set_editable(self, editable, row):
+        editable.set_text(self.to_string(row))
+
 
 class TextColumn(Column):
     def __init__(self, name):
@@ -115,6 +145,10 @@ class Grid(gtk.EventBox):
 
         self.model = None
         self.renderer = None
+        self.cursor = (-1, -1)
+
+    def set_cursor(self, row, column):
+        self.cursor = row, column
 
     def do_size_request(self, req):
         req.width = 500
@@ -156,42 +190,51 @@ class Grid(gtk.EventBox):
             self._vadj = v_adjustment
 
     def do_expose_event(self, event):
-        if self.window:
-            rw, rh = self.renderer.get_size(self)
+        rw, rh = self.renderer.get_size(self)
 
-            cr = self.window.cairo_create()
-            cr.set_source_rgb(0.8, 0.8, 0.8)
-            cr.set_line_width(1.0)
-            cr.set_dash([5.0, 2.0])
+        cr = self.window.cairo_create()
+        cr.set_source_rgb(0.8, 0.8, 0.8)
+        cr.set_line_width(1.0)
+        cr.set_dash([5.0, 2.0])
 
-            y = 0
-            x = -int(self._hadj.value)
-            maxy = self.allocation.height
-            i = int(self._vadj.value)
-            while y < maxy:
+        area = event.area
+        crow, ccol = self.cursor
+        y = 0
+        x = -int(self._hadj.value)
+        maxy = self.allocation.height
+        i = int(self._vadj.value)
+        while y < maxy:
+            if y <= area.y + area.height and y + rh >= area.y:
                 try:
                     row = self.model[i]
                 except IndexError:
                     break
 
-                self.renderer.draw(row, x, y, self.window, self, event.area, 0)
-                y += rh
-                i += 1
+                self.renderer.draw(row, x, y, self.window, self, area, 0,
+                    ccol if crow == i else -1)
 
-                cr.move_to(x, y + 0.5)
-                cr.line_to(event.area.width, y + 0.5)
+                cr.move_to(x, y + rh + 0.5)
+                cr.line_to(event.area.width, y + rh + 0.5)
                 cr.stroke()
-                y += 1
 
-            y -= 1
-            x += 0.5
-            for w in self.renderer.calculated_widths[:-1]:
-                x += w + 1
-                cr.move_to(x, 0)
-                cr.line_to(x, y)
-                cr.stroke()
+            y += rh + 1
+            i += 1
+
+
+        y -= 1
+        x += 0.5
+        for w in self.renderer.calculated_widths[:-1]:
+            x += w + 1
+            cr.move_to(x, 0)
+            cr.line_to(x, y)
+            cr.stroke()
 
         return True
+
+    def _queue_draw(self, row):
+        w, h = self.renderer.get_size(self)
+        y = (row - int(round(self._vadj.value))) * (h + 1)
+        self.queue_draw_area(0, y, w, h)
 
     def scroll_value_changed(self, *args):
         self.queue_draw()
@@ -199,3 +242,16 @@ class Grid(gtk.EventBox):
     def do_realize(self):
         gtk.EventBox.do_realize(self)
         self.window.set_background(self.style.base[gtk.STATE_NORMAL])
+
+    def do_key_press_event(self, event):
+        keyval = event.keyval
+
+        if keyval == Down:
+            self.set_cursor(self.cursor[0]+1, self.cursor[1])
+            self._queue_draw(self.cursor[0])
+
+        if keyval == Up:
+            self.set_cursor(self.cursor[0]-1, self.cursor[1])
+            self._queue_draw(self.cursor[0])
+
+        return True
