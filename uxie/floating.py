@@ -51,10 +51,15 @@ class FeedbackHelper(object):
         return self.fm.add_feedback(self.window, TextFeedback(text, category, timeout))
 
     def show_widget(self, widget, priority=0, timeout=0):
-        return self.fm.add_feedback(self.window, WidgetFeedback(widget, priority, timeout))
+        return self.fm.add_feedback(self.window, Feedback(widget, priority, timeout))
 
 
 class Feedback(object):
+    def __init__(self, widget, priority=0, timeout=0):
+        self.priority = priority
+        self.timeout = timeout
+        self.widget = widget
+
     def __cmp__(self, other):
         if self.priority < other.priority:
             return 1
@@ -63,21 +68,10 @@ class Feedback(object):
         else:
             return 0
 
-    def create_window(self):
-        window = gtk.Window(gtk.WINDOW_POPUP)
-        window.set_type_hint(gtk.gdk.WINDOW_TYPE_HINT_TOOLTIP)
-        window.set_can_focus(False)
-
-        return window
-
     def get_size(self):
-        self.window.resize(*self.window.size_request())
-        return self.window.get_size()
+        return self.widget.size_request()
 
     def show(self, window, x, y):
-        if self.window.window.get_parent() != window:
-            self.window.window.reparent(window, 0, 0)
-
         if not self.window.get_visible() and self.timeout > 0:
             glib.timeout_add(self.timeout, timeout, weakref.ref(self))
             self.start = time.time()
@@ -94,19 +88,7 @@ class Feedback(object):
         return self.window is not None
 
 
-class WidgetFeedback(Feedback):
-    def __init__(self, widget, priority=0, timeout=0):
-        self.priority = priority
-        self.timeout = timeout
-        self.widget = widget
-
-        self.window = self.create_window()
-        widget.show_all()
-        self.window.add(widget)
-        self.window.realize()
-        widget.realize()
-
-class TextFeedback(WidgetFeedback):
+class TextFeedback(Feedback):
     COLORS = {
         'info': '#55C',
         'done': '#5C5',
@@ -120,14 +102,17 @@ class TextFeedback(WidgetFeedback):
         if timeout is None:
             timeout = max(1500, 500 + len(text)*50)
 
+        frame = gtk.Frame()
         box = gtk.HBox()
+        frame.add(box)
         box.pack_start(FlatBox(5, TextFeedback.COLORS[category]), False, True)
 
         label = gtk.Label(text)
         label.set_padding(7, 5)
         box.pack_start(label, True, True)
 
-        WidgetFeedback.__init__(self, box, 0, timeout)
+        Feedback.__init__(self, frame, 0, timeout)
+
 
 class FloatBox(gtk.Container):
     __gsignals__ = {
@@ -141,13 +126,14 @@ class FloatBox(gtk.Container):
         self.child = None
         self.floats = {}
 
-    def add(self, widget):
+    def add(self, widget, x=0, y=0):
         if not self.child:
             self.child = widget
+            widget.set_parent(self)
         else:
-            self.floats[widget] = (0, 0)
-
-        widget.set_parent(self)
+            self.floats[widget] = x, y
+            widget.set_parent(self)
+            widget.realize()
 
     def do_remove(self, widget):
         widget.unparent()
@@ -172,11 +158,22 @@ class FloatBox(gtk.Container):
 
             for f, (x, y) in self.floats.iteritems():
                 w, h = f.size_request()
-                calloc = gtk.gdk.Rectangle(allocation.x + x, allocation.y + y, w, h)
+                if x < 0:
+                    x = allocation.x + allocation.width - w + x
+                else:
+                    x = allocation.x + x
+
+                if y < 0:
+                    y = allocation.y + allocation.height - h + y
+                else:
+                    y = allocation.y + y
+
+                calloc = gtk.gdk.Rectangle(x, y, w, h)
                 f.size_allocate(calloc)
 
     def do_forall(self, int, callback, data):
         if self.child:
             callback(self.child, data)
             for f in list(self.floats):
+                print f, callback
                 callback(f, data)
