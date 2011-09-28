@@ -3,11 +3,12 @@ import gtk
 from .utils import send_focus_change
 
 class InteractiveSearch(object):
-    def __init__(self, search_callback):
-        self.window = None
+    def __init__(self, search_callback, widget_created_cb):
+        self.floating = None
         self.widget = None
         self.entry = None
         self.search_callback = search_callback
+        self.widget_created_cb = widget_created_cb
 
     def attach(self, widget):
         self.widget = widget
@@ -30,7 +31,7 @@ class InteractiveSearch(object):
 
         if not state:
             if keyval == gtk.keysyms.Escape:
-                self.window.hide()
+                self.floating.hide()
                 return True
 
             if keyval == gtk.keysyms.Up:
@@ -42,7 +43,7 @@ class InteractiveSearch(object):
                 return True
 
             if keyval == gtk.keysyms.Return:
-                self.window.hide()
+                self.floating.hide()
                 return False
 
         return True
@@ -51,49 +52,29 @@ class InteractiveSearch(object):
         self.search_callback(entry.get_text(), 1, False)
 
     def ensure_window_created(self):
-        top = self.widget.get_toplevel()
-        if not self.window:
-            self.window = gtk.Window(gtk.WINDOW_POPUP)
-            self.window.set_type_hint(gtk.gdk.WINDOW_TYPE_HINT_UTILITY)
-            self.window.set_border_width(3)
+        if not self.floating:
+            self.floating = gtk.EventBox()
 
             frame = gtk.Frame()
             frame.set_shadow_type(gtk.SHADOW_ETCHED_IN)
-            self.window.add(frame)
-            frame.show()
+            self.floating.add(frame)
 
             self.entry = gtk.Entry()
             self.entry.connect('changed', self.on_entry_changed)
             frame.add(self.entry)
-            self.entry.show()
-            self.entry.realize()
 
+            self.widget_created_cb(self.floating)
+            return False
 
-        if top.has_group():
-            top.get_group().add_window(self.window)
-        elif self.window.has_group():
-            self.window.get_group().remove_window(self.window)
-
-        self.window.set_screen(top.get_screen())
+        return True
 
     def is_active(self):
-        return self.window and self.window.get_visible()
+        return self.floating and self.floating.get_visible()
 
     def delegate(self, event):
-        self.ensure_window_created()
-        if not self.window.get_visible():
-            win = self.widget.window
-            if self.window.window.get_parent() != win:
-                self.window.window.reparent(win, 0, 0)
-
-            _, _, x, y, _ = win.get_geometry()
-            mw, mh = self.window.get_size()
-
+        if not self.ensure_window_created() or not self.floating.get_visible():
+            self.floating.show()
             self.entry.set_text('')
-
-            self.window.move(x - mw, y - mh)
-            self.window.show()
-
             send_focus_change(self.entry, True)
 
         self.entry.event(event)
