@@ -21,8 +21,9 @@ class Manager(object):
         if timeout:
             glib.timeout_add(timeout, floating_timeout, weakref.ref(floating))
 
+        floating.start = time.time()
         self.floatings.setdefault(parent, []).append(
-            (priority, time.time(), place_vertically, floating))
+            (priority, floating.start, place_vertically, floating))
         self.arrange(parent)
         return floating
 
