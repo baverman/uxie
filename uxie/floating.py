@@ -66,7 +66,9 @@ class FeedbackHelper(object):
         self.fm = fm
 
     def show(self, text, category=None, timeout=None):
-        return self.fm.add(self.parent, TextFeedback(text, category), 5, timeout)
+        fb = TextFeedback(text, category)
+        timeout = timeout or fb.timeout
+        return self.fm.add(self.parent, fb , 5, timeout)
 
     def show_widget(self, widget, priority=0, timeout=None, place_vertically=True):
         return self.fm.add(self.parent, Feedback(widget), priority, timeout, place_vertically)
