@@ -1,13 +1,47 @@
+class Injector(object):
+    def __init__(self, activator, plugin_manager):
+        self.activator = activator
+        self.plugin_manager = plugin_manager
+
+    def ready(self, name, obj):
+        return self.plugin_manager.ready(name, obj)
+
+    def done(self, name, obj):
+        return self.plugin_manager.done(name, obj)
+
+    def on_ready(self, name, callback):
+        return self.plugin_manager.on_ready(name, callback)
+
+    def on_done(self, name, callback):
+        return self.plugin_manager.on_done(name, callback)
+
+    def on(self, context):
+        return self.activator.on(context)
+
+    def bind_accel(self, ctx, name, desc, accel, callback, priority=0, *args):
+        return self.activator.bind_accel(ctx, name, desc, accel, callback, priority, *args)
+
+    def bind(self, ctx, name, desc, callback, *args):
+        return self.activator.bind(ctx, name, desc, callback, *args)
+
+    def map(self, ctx, name, accel, priority=0):
+        return self.activator.map(ctx, name, accel, priority)
+
+    def add_context(self, ctx, depends, callback):
+        return self.activator.add_context(ctx, depends, callback)
+
+
 class Manager(object):
     def __init__(self, activator):
-        self.activator = activator
         self.plugins = []
         self.ready_callbacks = {}
         self.ready_objects = {}
+        self.done_callbacks = {}
+        self.injector = Injector(activator, self)
 
     def add_plugin(self, plugin):
         self.plugins.append(plugin)
-        plugin.init(self.activator, self)
+        plugin.init(self.injector)
 
     def ready(self, name, obj):
         self.ready_objects.setdefault(name, []).append(obj)
@@ -15,8 +49,21 @@ class Manager(object):
             for c in self.ready_callbacks[name]:
                 c(obj)
 
+    def done(self, name, obj):
+        try:
+            self.ready_objects.setdefault(name, []).remove(obj)
+        except ValueError:
+            pass
+
+        if name in self.done_callbacks:
+            for c in self.done_callbacks[name]:
+                c(obj)
+
     def on_ready(self, name, callback):
         if name in self.ready_objects:
             map(callback, self.ready_objects[name])
 
         self.ready_callbacks.setdefault(name, []).append(callback)
+
+    def on_done(self, name, callback):
+        self.done_callbacks.setdefault(name, []).append(callback)
