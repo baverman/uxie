@@ -1,38 +1,6 @@
 from bisect import bisect
 import gtk
-
-class Activator(object):
-    def __init__(self):
-        self.accel_group = gtk.AccelGroup()
-        self.actions = {}
-        self.shortcuts = {}
-
-    def attach(self, window):
-        window.add_accel_group(self.accel_group)
-
-    def map(self, name, accel):
-        key, modifier = km = gtk.accelerator_parse(accel)
-        if key == 0:
-            import warnings
-            warnings.warn("Can't parse %s" % accel)
-
-        self.accel_group.connect_group(key, modifier, gtk.ACCEL_VISIBLE, self.activate)
-        self.shortcuts.setdefault(km, []).append(name)
-
-    def bind(self, name, desc, callback, *args):
-        self.actions[name] = (desc, callback, args)
-
-    def bind_accel(self, name, desc, accel, callback, *args):
-        self.bind(name, desc, callback, *args)
-        self.map(name, accel)
-
-    def get_callback_and_args(self, *key):
-        return self.actions[self.shortcuts[key][0]][1:]
-
-    def activate(self, group, window, key, modifier):
-        cb, args = self.get_callback_and_args(key, modifier)
-        result = cb(*args)
-        return result is None or result
+import itertools
 
 class ContextHolder():
     def __init__(self, activator, context):
@@ -42,11 +10,11 @@ class ContextHolder():
     def map(self, name, accel, priority=0):
         self.activator.map(self.context, name, accel, priority)
 
-    def bind(self, name, desc, callback, *args):
-        self.activator.bind(self.context, name, desc, callback, *args)
+    def bind(self, name, menu_entry, callback, *args):
+        self.activator.bind(self.context, name, menu_entry, callback, *args)
 
-    def bind_accel(self, name, desc, accel, callback, priority=0, *args):
-        self.activator.bind_accel(self.context, name, desc, accel, callback, priority, *args)
+    def bind_accel(self, name, menu_entry, accel, callback, priority=0, *args):
+        self.activator.bind_accel(self.context, name, menu_entry, accel, callback, priority, *args)
 
     def __enter__(self):
         return self
@@ -54,11 +22,17 @@ class ContextHolder():
     def __exit__(self, exc_type, exc_val, exc_tb):
         pass
 
-class ContextActivator(Activator):
+class Activator(object):
     def __init__(self):
-        Activator.__init__(self)
+        self.accel_group = gtk.AccelGroup()
+        self.actions = {}
+        self.shortcuts = {}
         self.generic_shortcuts = {}
         self.contexts = {}
+        self.menu_entries = {}
+
+        self.bind_accel('window-activator', 'root-menu', 'HIDDEN/Root menu',
+            '<ctrl>1', show_actions_menu)
 
     def attach(self, window):
         window.add_accel_group(self.accel_group)
@@ -75,16 +49,17 @@ class ContextActivator(Activator):
     def on(self, context):
         return ContextHolder(self, context)
 
-    def bind_accel(self, ctx, name, desc, accel, callback, priority=0, *args):
-        self.bind(ctx, name, desc, callback, *args)
+    def bind_accel(self, ctx, name, menu_entry, accel, callback, priority=0, *args):
+        self.bind(ctx, name, menu_entry, callback, *args)
         self.map(ctx, name, accel, priority)
 
     def _add_shortcut(self, km, ctx, name, priority):
         shortcuts = self.shortcuts.setdefault(km, [])
         shortcuts.insert(bisect(shortcuts, priority), (priority, ctx, name))
 
-    def bind(self, ctx, name, desc, callback, *args):
-        self.actions.setdefault(ctx, {})[name] = (desc, callback, args)
+    def bind(self, ctx, name, menu_entry, callback, *args):
+        self.actions.setdefault(ctx, {})[name] = callback, args
+        self.menu_entries.setdefault(ctx, {})[name] = menu_entry
         if name in self.generic_shortcuts:
             for km, priority in self.generic_shortcuts[name]:
                 self._add_shortcut(km, ctx, name, -priority)
@@ -105,7 +80,7 @@ class ContextActivator(Activator):
         for _, ctx, name in self.shortcuts[(key, modifier)]:
             ctx_obj = self.get_context(window, ctx)
             if ctx_obj:
-                cb, args = self.actions[ctx][name][1:]
+                cb, args = self.actions[ctx][name]
                 result = cb(ctx_obj, *args)
                 return result is None or result
 
@@ -141,9 +116,20 @@ class ContextActivator(Activator):
         return result
 
     def get_context(self, window, ctx):
-        return self._find_context(ctx, {'window':window})
+        return self._find_context(ctx, {'window':window, 'window-activator':(window, self)})
+
+    def get_allowed_actions(self, window):
+        cache = {'window':window}
+        for ctx in itertools.chain(('window',), self.contexts):
+            ctx_obj = self._find_context(ctx, cache)
+            if ctx_obj:
+                print ctx, self.menu_entries.get(ctx, None)
 
     def add_context(self, ctx, depends, callback):
         if isinstance(depends, str):
             depends = (depends,)
         self.contexts[ctx] = depends, callback
+
+def show_actions_menu(args):
+    window, activator = args
+    activator.get_allowed_actions(window)

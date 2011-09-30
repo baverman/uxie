@@ -18,11 +18,11 @@ class Injector(object):
     def on(self, context):
         return self.activator.on(context)
 
-    def bind_accel(self, ctx, name, desc, accel, callback, priority=0, *args):
-        return self.activator.bind_accel(ctx, name, desc, accel, callback, priority, *args)
+    def bind_accel(self, ctx, name, menu_entry, accel, callback, priority=0, *args):
+        return self.activator.bind_accel(ctx, name, menu_entry, accel, callback, priority, *args)
 
-    def bind(self, ctx, name, desc, callback, *args):
-        return self.activator.bind(ctx, name, desc, callback, *args)
+    def bind(self, ctx, name, menu_entry, callback, *args):
+        return self.activator.bind(ctx, name, menu_entry, callback, *args)
 
     def map(self, ctx, name, accel, priority=0):
         return self.activator.map(ctx, name, accel, priority)
