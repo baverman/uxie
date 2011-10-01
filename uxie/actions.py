@@ -31,8 +31,8 @@ class Activator(object):
         self.contexts = {}
         self.menu_entries = {}
 
-        self.bind_accel('window-activator', 'root-menu', 'HIDDEN/Root menu',
-            '<ctrl>1', show_actions_menu)
+        self.bind_accel('window-activator', 'root-menu', 'Root menu',
+            '<ctrl>1', show_actions_menu())
 
     def attach(self, window):
         window.add_accel_group(self.accel_group)
@@ -118,18 +118,95 @@ class Activator(object):
     def get_context(self, window, ctx):
         return self._find_context(ctx, {'window':window, 'window-activator':(window, self)})
 
-    def get_allowed_actions(self, window):
+    def get_km_for_action(self, ctx, name):
+        result = []
+        for km, actions in self.shortcuts.iteritems():
+            for _, actx, aname in actions:
+                if ctx == actx and name == aname:
+                    result.append(km)
+
+                break
+
+        return result
+
+    def get_allowed_actions(self, window, path):
         cache = {'window':window}
+
+        if path and not path.endswith('/'):
+            path = path + '/'
+
+        plen = len(path)
+
+        actions = {}
+
         for ctx in itertools.chain(('window',), self.contexts):
             ctx_obj = self._find_context(ctx, cache)
             if ctx_obj:
-                print ctx, self.menu_entries.get(ctx, None)
+                for name, entry in self.menu_entries.get(ctx, {}).items():
+                    if entry.startswith(path):
+                        items = entry[plen:].split('/')
+                        p = actions
+                        for r in items[:-1]:
+                            p = p.setdefault(r, {})
+
+                        p[items[-1]] = ctx, name
+
+        return actions
 
     def add_context(self, ctx, depends, callback):
         if isinstance(depends, str):
             depends = (depends,)
         self.contexts[ctx] = depends, callback
 
-def show_actions_menu(args):
-    window, activator = args
-    activator.get_allowed_actions(window)
+def fill_menu(menu, window, activator, actions):
+    menu.set_reserve_toggle_size(False)
+
+    for label, v in sorted(actions.items(), key=lambda r: r[0].replace('_', '')):
+        if isinstance(v, tuple):
+            km = activator.get_km_for_action(*v)
+            submenu = None
+        else:
+            km = None
+            submenu = gtk.Menu()
+
+        if km:
+            item = gtk.MenuItem(None, True)
+            box = gtk.HBox(False, 5)
+            label = gtk.Label(label)
+            label.set_alignment(0, 0.5)
+            label.set_use_underline(True)
+            box.pack_start(label)
+
+            accel_label = gtk.Label(', '.join(gtk.accelerator_get_label(*r) for r in km))
+            accel_label.set_alignment(1, 0.5)
+            accel_label.modify_fg(gtk.STATE_NORMAL, accel_label.style.fg[gtk.STATE_INSENSITIVE])
+            accel_label.modify_fg(gtk.STATE_PRELIGHT, accel_label.style.fg[gtk.STATE_INSENSITIVE])
+            box.pack_start(accel_label)
+            item.add(box)
+        else:
+            item = gtk.MenuItem(label, True)
+
+        if submenu:
+            item.set_submenu(submenu)
+
+        menu.append(item)
+
+    menu.show_all()
+
+def show_actions_menu(path=''):
+    def inner(args):
+        window, activator = args
+        actions = activator.get_allowed_actions(window, path)
+
+        def get_coords(menu):
+            win = window.window
+            x, y, w, h, _ = win.get_geometry()
+            x, y = win.get_origin()
+            mw, mh = menu.size_request()
+            return x + w - mw, y + h - mh, False
+
+        menu = gtk.Menu()
+        fill_menu(menu, window, activator, actions)
+        menu.popup(None, None, get_coords, 0, gtk.get_current_event_time())
+
+    return inner
