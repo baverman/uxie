@@ -161,6 +161,12 @@ class Activator(object):
 def fill_menu(menu, window, activator, actions):
     menu.set_reserve_toggle_size(False)
 
+    def activate_sub_menu(item, items):
+        menu = item.get_submenu()
+        if not getattr(menu, 'already_filled', None):
+            fill_menu(menu, window, activator, items)
+            menu.already_filled = True
+
     for label, v in sorted(actions.items(), key=lambda r: r[0].replace('_', '')):
         if isinstance(v, tuple):
             km = activator.get_km_for_action(*v)
@@ -188,6 +194,7 @@ def fill_menu(menu, window, activator, actions):
 
         if submenu:
             item.set_submenu(submenu)
+            item.connect('activate', activate_sub_menu, v)
 
         menu.append(item)
 
