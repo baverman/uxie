@@ -1,6 +1,5 @@
 from bisect import bisect
 import gtk
-import itertools
 
 class ContextHolder():
     def __init__(self, activator, context):
@@ -136,26 +135,35 @@ class Activator(object):
     def get_allowed_actions(self, window, path):
         cache = {'window':window}
 
-        if path and not path.endswith('/'):
-            path = path + '/'
+        def get_actions(path):
+            if path and not path.endswith('/'):
+                path = path + '/'
 
-        plen = len(path)
+            plen = len(path)
 
-        actions = {}
+            actions = []
+            added_submenus = set()
+            for ctx, entries in self.menu_entries.iteritems():
+                for name, entry in entries.iteritems():
+                    if entry == 'Root menu':
+                        continue
 
-        for ctx in itertools.chain(('window',), self.contexts):
-            ctx_obj = self._find_context(ctx, cache)
-            if ctx_obj:
-                for name, entry in self.menu_entries.get(ctx, {}).items():
                     if entry.startswith(path):
                         items = entry[plen:].split('/')
-                        p = actions
-                        for r in items[:-1]:
-                            p = p.setdefault(r, {})
+                        label = items[0]
+                        if len(items) > 1:
+                            if label not in added_submenus:
+                                actions.append((label, get_actions(path + label)))
+                                added_submenus.add(label)
+                        else:
+                            ctx_obj = self._find_context(ctx, cache)
+                            if ctx_obj:
+                                actions.append((label, (ctx, name, ctx_obj)))
 
-                        p[items[-1]] = ctx, name, ctx_obj
+            for a in actions:
+                yield a
 
-        return actions
+        return get_actions(path)
 
     def add_context(self, ctx, depends, callback):
         if isinstance(depends, str):
@@ -171,7 +179,7 @@ def fill_menu(menu, window, activator, actions):
             fill_menu(menu, window, activator, items)
             menu.already_filled = True
 
-    for label, v in sorted(actions.items(), key=lambda r: r[0].replace('_', '')):
+    for label, v in sorted(actions, key=lambda r: r[0].replace('_', '')):
         if isinstance(v, tuple):
             km = activator.get_km_for_action(*v[:2])
             submenu = None
