@@ -97,8 +97,11 @@ class Activator(object):
         return False
 
     def activate_action(self, item, ctx, name, ctx_obj):
-        cb, args = self.actions[ctx][name]
-        cb(ctx_obj, *args)
+        if name.startswith('!'):
+            ctx_obj()
+        else:
+            cb, args = self.actions[ctx][name]
+            cb(ctx_obj, *args)
 
     def _find_context(self, ctx, cache):
         try:
@@ -168,7 +171,12 @@ class Activator(object):
                     else:
                         ctx_obj = self._find_context(ctx, cache)
                         if ctx_obj:
-                            actions.append((label, (ctx, name, ctx_obj)))
+                            if name.startswith('!'):
+                                cb, args = self.actions[ctx][name]
+                                for label, action_cb in cb(ctx_obj, *args):
+                                    actions.append((label, (ctx, name, action_cb)))
+                            else:
+                                actions.append((label, (ctx, name, ctx_obj)))
 
             for a in actions:
                 yield a
@@ -199,7 +207,7 @@ def fill_menu(menu, window, activator, actions):
 
         if km:
             item = gtk.MenuItem(None, True)
-            box = gtk.HBox(False, 5)
+            box = gtk.HBox(False, 20)
             label = gtk.Label(label)
             label.set_alignment(0, 0.5)
             label.set_use_underline(True)
