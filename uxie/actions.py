@@ -28,7 +28,8 @@ class Activator(object):
         self.shortcuts = {}
         self.generic_shortcuts = {}
         self.contexts = {}
-        self.menu_entries = {}
+        self.menu_entries = []
+        self.menu_entries_tail_len = 0
 
         self.bind_accel('window-activator', 'root-menu', 'Root menu',
             '<ctrl>1', show_actions_menu())
@@ -56,9 +57,18 @@ class Activator(object):
         shortcuts = self.shortcuts.setdefault(km, [])
         shortcuts.insert(bisect(shortcuts, priority), (priority, ctx, name))
 
+    def add_menu_entry(self, ctx, name, menu_entry):
+        if menu_entry.startswith('$'):
+            self.menu_entries_tail_len += 1
+            self.menu_entries.append((ctx, name, menu_entry[1:]))
+        else:
+            idx = len(self.menu_entries) - self.menu_entries_tail_len
+            self.menu_entries.insert(idx, (ctx, name, menu_entry))
+
     def bind(self, ctx, name, menu_entry, callback, *args):
         self.actions.setdefault(ctx, {})[name] = callback, args
-        self.menu_entries.setdefault(ctx, {})[name] = menu_entry
+        self.add_menu_entry(ctx, name, menu_entry)
+
         if name in self.generic_shortcuts:
             for km, priority in self.generic_shortcuts[name]:
                 self._add_shortcut(km, ctx, name, -priority)
@@ -143,22 +153,21 @@ class Activator(object):
 
             actions = []
             added_submenus = set()
-            for ctx, entries in self.menu_entries.iteritems():
-                for name, entry in entries.iteritems():
-                    if entry == 'Root menu':
-                        continue
+            for ctx, name, entry in self.menu_entries:
+                if entry == 'Root menu':
+                    continue
 
-                    if entry.startswith(path):
-                        items = entry[plen:].split('/')
-                        label = items[0]
-                        if len(items) > 1:
-                            if label not in added_submenus:
-                                actions.append((label, get_actions(path + label)))
-                                added_submenus.add(label)
-                        else:
-                            ctx_obj = self._find_context(ctx, cache)
-                            if ctx_obj:
-                                actions.append((label, (ctx, name, ctx_obj)))
+                if entry.startswith(path):
+                    items = entry[plen:].split('/')
+                    label = items[0]
+                    if len(items) > 1:
+                        if label not in added_submenus:
+                            actions.append((label, get_actions(path + label)))
+                            added_submenus.add(label)
+                    else:
+                        ctx_obj = self._find_context(ctx, cache)
+                        if ctx_obj:
+                            actions.append((label, (ctx, name, ctx_obj)))
 
             for a in actions:
                 yield a
@@ -179,7 +188,7 @@ def fill_menu(menu, window, activator, actions):
             fill_menu(menu, window, activator, items)
             menu.already_filled = True
 
-    for label, v in sorted(actions, key=lambda r: r[0].replace('_', '')):
+    for label, v in actions:
         if isinstance(v, tuple):
             km = activator.get_km_for_action(*v[:2])
             submenu = None
