@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from bisect import bisect
 import gtk
 
@@ -204,7 +205,13 @@ def fill_menu(menu, window, activator, actions):
             label.set_use_underline(True)
             box.pack_start(label)
 
-            accel_label = gtk.Label(', '.join(gtk.accelerator_get_label(*r) for r in km))
+            full_accel_str = ', '.join(gtk.accelerator_get_label(*r) for r in km)
+            if len(km) > 1:
+                accel_label = gtk.Label(gtk.accelerator_get_label(*km[0]) + '>')
+                accel_label.set_tooltip_text(full_accel_str)
+            else:
+                accel_label = gtk.Label(full_accel_str)
+
             accel_label.set_alignment(1, 0.5)
             accel_label.modify_fg(gtk.STATE_NORMAL, accel_label.style.fg[gtk.STATE_INSENSITIVE])
             accel_label.modify_fg(gtk.STATE_PRELIGHT, accel_label.style.fg[gtk.STATE_INSENSITIVE])
