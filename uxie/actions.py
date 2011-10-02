@@ -86,6 +86,10 @@ class Activator(object):
 
         return False
 
+    def activate_action(self, item, ctx, name, ctx_obj):
+        cb, args = self.actions[ctx][name]
+        cb(ctx_obj, *args)
+
     def _find_context(self, ctx, cache):
         try:
             return cache[ctx]
@@ -149,7 +153,7 @@ class Activator(object):
                         for r in items[:-1]:
                             p = p.setdefault(r, {})
 
-                        p[items[-1]] = ctx, name
+                        p[items[-1]] = ctx, name, ctx_obj
 
         return actions
 
@@ -169,7 +173,7 @@ def fill_menu(menu, window, activator, actions):
 
     for label, v in sorted(actions.items(), key=lambda r: r[0].replace('_', '')):
         if isinstance(v, tuple):
-            km = activator.get_km_for_action(*v)
+            km = activator.get_km_for_action(*v[:2])
             submenu = None
         else:
             km = None
@@ -195,6 +199,8 @@ def fill_menu(menu, window, activator, actions):
         if submenu:
             item.set_submenu(submenu)
             item.connect('activate', activate_sub_menu, v)
+        else:
+            item.connect('activate', activator.activate_action, *v)
 
         menu.append(item)
 
