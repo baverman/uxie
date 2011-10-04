@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from bisect import bisect
 import gtk
-from gtk.keysyms import F2
+from gtk.keysyms import F2, Escape
 
 class ContextHolder():
     def __init__(self, activator, context):
@@ -57,9 +57,10 @@ class Activator(object):
         self.bind(ctx, name, menu_entry, callback, *args)
         self.map(ctx, name, accel, priority)
 
-    def _add_shortcut(self, km, ctx, name, priority):
+    def _add_shortcut(self, km, ctx, name, priority, is_generic=False):
+        self.accel_group.connect_group(km[0], km[1], gtk.ACCEL_VISIBLE, self.activate)
         shortcuts = self.shortcuts.setdefault(km, [])
-        shortcuts.insert(bisect(shortcuts, priority), (priority, ctx, name))
+        shortcuts.insert(bisect(shortcuts, priority), (priority, ctx, name, is_generic))
 
     def get_menu_entry_list(self, entries, label, new_value):
         entry = label.replace('_', '').lstrip('$')
@@ -98,7 +99,7 @@ class Activator(object):
 
         if name in self.generic_shortcuts:
             for km, priority in self.generic_shortcuts[name]:
-                self._add_shortcut(km, ctx, name, -priority)
+                self._add_shortcut(km, ctx, name, -priority, True)
 
     def bind_menu(self, ctx, name, menu_entry, generator, resolver):
         name = '!' + name
@@ -121,14 +122,29 @@ class Activator(object):
             import warnings
             warnings.warn("Can't parse %s" % accel)
 
-        self.accel_group.connect_group(key, modifier, gtk.ACCEL_VISIBLE, self.activate)
         if ctx is None:
             self.generic_shortcuts.setdefault(name, []).append((km, priority))
         else:
-            self._add_shortcut(km, ctx, name, -priority)
+            self._add_shortcut(km, ctx, name, -priority, False)
+
+    def replace_keys(self, ctx, name, keys):
+        if not ctx:
+            self.generic_shortcuts.setdefault(name, [])[:] = []
+            for km, pr in keys:
+                self.generic_shortcuts[name].append((km, pr))
+        else:
+            for km in self.shortcuts:
+                actions = self.shortcuts[km]
+                actions[:] = [r for r in actions if r[1] != ctx or r[2] != name]
+
+            for km, pr in self.generic_shortcuts.get(name, []):
+                self._add_shortcut(km, ctx, name, -pr, True)
+
+            for km, pr in keys:
+                self._add_shortcut(km, ctx, name, -pr, False)
 
     def activate(self, group, window, key, modifier):
-        for _, ctx, name in self.shortcuts[(key, modifier)]:
+        for _, ctx, name, _ in self.shortcuts[(key, modifier)]:
             ctx_obj = self.get_context(window, ctx)
             if ctx_obj:
                 try:
@@ -158,7 +174,11 @@ class Activator(object):
         if event.keyval == F2:
             item = getattr(menu, 'current_item', None)
             if item:
-                print item.activate_context, self.get_km_for_action(*item.activate_context[:2])
+                w = ShortcutChangeDialog(self, *item.activate_context[:2])
+                w.set_transient_for(menu.tr_window)
+                menu.cancel()
+                w.show_all()
+
                 return True
 
         return False
@@ -195,14 +215,15 @@ class Activator(object):
     def get_context(self, window, ctx):
         return self._find_context(ctx, {'window':window, 'window-activator':(window, self)})
 
-    def get_km_for_action(self, ctx, name):
+    def get_km_for_action(self, ctx, name, return_all=False):
         result = []
         for km, actions in self.shortcuts.iteritems():
-            for _, actx, aname in actions:
+            for pr, actx, aname, is_generic in actions:
                 if ctx == actx and name == aname:
-                    result.append(km)
+                    result.append((km, pr, is_generic))
 
-                break
+                if not return_all:
+                    break
 
         return result
 
@@ -249,6 +270,7 @@ def on_item_select(item, is_select):
 
 def fill_menu(menu, window, activator, actions):
     menu.set_reserve_toggle_size(False)
+    menu.tr_window = window
 
     def activate_sub_menu(item, items):
         menu = item.get_submenu()
@@ -273,9 +295,9 @@ def fill_menu(menu, window, activator, actions):
             label.set_use_underline(True)
             box.pack_start(label)
 
-            full_accel_str = ', '.join(gtk.accelerator_get_label(*r) for r in km)
+            full_accel_str = ', '.join(gtk.accelerator_get_label(*r[0]) for r in km)
             if len(km) > 1:
-                accel_label = gtk.Label(gtk.accelerator_get_label(*km[0]) + '>')
+                accel_label = gtk.Label(gtk.accelerator_get_label(*km[0][0]) + '>')
                 accel_label.set_tooltip_text(full_accel_str)
             else:
                 accel_label = gtk.Label(full_accel_str)
@@ -319,3 +341,117 @@ def show_actions_menu(path=''):
         menu.popup(None, None, get_coords, 0, gtk.get_current_event_time())
 
     return inner
+
+
+class ShortcutChangeDialog(gtk.Window):
+    def __init__(self, activator, ctx, name):
+        gtk.Window.__init__(self, gtk.WINDOW_TOPLEVEL)
+        self.set_modal(True)
+        self.set_position(gtk.WIN_POS_CENTER_ON_PARENT)
+        self.set_title('Change shortcut')
+        self.set_border_width(5)
+        self.connect('delete-event', self.quit)
+        self.connect('key-press-event', self.on_key_press_event)
+
+        self.activator = activator
+        self.acontext = ctx, name
+
+        box = gtk.VBox(False, 10)
+        self.add(box)
+
+        label = gtk.Label()
+        label.set_markup('<b>Action:</b> ' + name)
+        label.set_alignment(0, 0.5)
+        label.set_width_chars(40)
+        box.pack_start(label, False, False)
+
+        if name in activator.generic_shortcuts:
+            view, self.default_model = self.create_view('default', activator.generic_shortcuts[name])
+            box.pack_start(view)
+        else:
+            self.default_model = None
+
+        view, self.ctx_model = self.create_view(
+            ctx, ((r[0], -r[1]) for r in activator.get_km_for_action(ctx, name, True) if not r[2]))
+        box.pack_start(view)
+
+    def add_rows_if_needed(self, model):
+        for r in list(model):
+            if r[0] == r[1] == 0:
+                del model[r.path]
+
+        model.append((0, 0, 0))
+
+    def on_accel_edited(self, renderer, path, key, mod, code, model):
+        model[path][0] = key
+        model[path][1] = mod
+        self.add_rows_if_needed(model)
+
+    def on_accel_cleared(self, renderer, path, model):
+        if model[path][0] == model[path][1] == 0:
+            model[path][0], model[path][1] = gtk.accelerator_parse('BackSpace')
+        else:
+            model[path][0] = 0
+            model[path][1] = 0
+
+        self.add_rows_if_needed(model)
+
+    def on_priority_edited(self, renderer, path, text, model):
+        model[path][2] = int(text)
+
+    def create_view(self, ctx, items):
+        box = gtk.VBox(False, 5)
+
+        label = gtk.Label()
+        label.set_alignment(0, 0.5)
+        label.set_markup(ctx + ':')
+        box.pack_start(label, False, False)
+
+        frame = gtk.Frame()
+        box.pack_start(frame)
+
+        model = gtk.ListStore(int, int, int)
+        view = gtk.TreeView(model)
+        view.set_headers_visible(False)
+        view.set_border_width(5)
+        frame.add(view)
+
+        cell = gtk.CellRendererAccel()
+        cell.props.editable = True
+        cell.connect('accel-edited', self.on_accel_edited, model)
+        cell.connect('accel-cleared', self.on_accel_cleared, model)
+        view.append_column(gtk.TreeViewColumn('accel', cell, accel_key=0, accel_mods=1))
+
+        cell = gtk.CellRendererText()
+        cell.props.editable = True
+        cell.props.xalign = 1
+        cell.props.width_chars = 5
+        cell.connect('edited', self.on_priority_edited, model)
+        view.append_column(gtk.TreeViewColumn('priority', cell, text=2))
+
+        for (key, mod), pr  in items:
+            model.append((key, mod, pr))
+
+        model.append((0, 0, 0))
+
+        return box, model
+
+    def get_keys(self, model):
+        for r in model:
+            if r[0]:
+                yield (r[0], r[1]), r[2]
+
+    def quit(self, *args):
+        ctx, name = self.acontext
+        if self.default_model:
+            self.activator.replace_keys(None, name, list(self.get_keys(self.default_model)))
+
+        self.activator.replace_keys(ctx, name, list(self.get_keys(self.ctx_model)))
+
+    def on_key_press_event(self, window, event):
+        if event.keyval == Escape:
+            self.quit()
+            self.destroy()
+            return True
+
+        return False
