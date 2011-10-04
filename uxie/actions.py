@@ -258,12 +258,13 @@ def fill_menu(menu, window, activator, actions):
 
     for label, t, v in actions:
         if t == 'item':
-            km = activator.get_km_for_action(*v[:2])
+            acontext = v
             submenu = None
         else:
-            km = None
+            acontext = 'window-activator', '!show-menu/' + v[0]
             submenu = gtk.Menu()
 
+        km = activator.get_km_for_action(*acontext[:2])
         if km:
             item = gtk.MenuItem(None, True)
             box = gtk.HBox(False, 20)
@@ -288,13 +289,12 @@ def fill_menu(menu, window, activator, actions):
             item = gtk.MenuItem(label, True)
 
         if submenu:
-            item.activate_context = 'window-activator', '!show-menu/' + v[0]
             item.set_submenu(submenu)
             item.connect('activate', activate_sub_menu, v[1])
         else:
-            item.activate_context = v
             item.connect('activate', activator.activate_menu_item)
 
+        item.activate_context = acontext
         item.connect_after('select', on_item_select, True)
         item.connect_after('deselect', on_item_select, False)
         menu.append(item)
