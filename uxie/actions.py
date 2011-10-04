@@ -36,7 +36,7 @@ class Activator(object):
         self.bind_accel('window-activator', 'root-menu', 'Root menu',
             '<ctrl>1', show_actions_menu(''))
 
-        self.bind_menu('window-activator', 'show-menu', None, None, show_actions_menu)
+        self.bind_menu('window-activator', 'show-menu', None, None, actions_menu_resolver)
 
     def attach(self, window):
         window.add_accel_group(self.accel_group)
@@ -58,8 +58,10 @@ class Activator(object):
         self.map(ctx, name, accel, priority)
 
     def _add_shortcut(self, km, ctx, name, priority, is_generic=False):
-        self.accel_group.connect_group(km[0], km[1], gtk.ACCEL_VISIBLE, self.activate)
         shortcuts = self.shortcuts.setdefault(km, [])
+        if not shortcuts:
+            self.accel_group.connect_group(km[0], km[1], gtk.ACCEL_VISIBLE, self.activate)
+
         shortcuts.insert(bisect(shortcuts, priority), (priority, ctx, name, is_generic))
 
     def get_menu_entry_list(self, entries, label, new_value):
@@ -94,7 +96,7 @@ class Activator(object):
         self.get_menu_entry_list(entries, items[-1], lambda l:(ctx, name, l))
 
     def bind(self, ctx, name, menu_entry, callback, *args):
-        self.actions.setdefault(ctx, {})[name] = callback, args
+        self.actions.setdefault(ctx, {})[name] = callback, args, menu_entry
         self.add_menu_entry(ctx, name, menu_entry)
 
         if name in self.generic_shortcuts:
@@ -105,10 +107,9 @@ class Activator(object):
         name = '!' + name
 
         if menu_entry:
-            menu_entry = menu_entry + '/_entries'
-            self.add_menu_entry(ctx, name, menu_entry)
+            self.add_menu_entry(ctx, name, menu_entry + '/_entries')
 
-        self.actions.setdefault(ctx, {})[name] = generator, resolver
+        self.actions.setdefault(ctx, {})[name] = generator, resolver, menu_entry
 
     def map_menu(self, path, accel, priority=None):
         self.map('window-activator', '!show-menu/' + path, accel, priority)
@@ -137,6 +138,9 @@ class Activator(object):
                 actions = self.shortcuts[km]
                 actions[:] = [r for r in actions if r[1] != ctx or r[2] != name]
 
+                if not actions:
+                    self.accel_group.disconnect_key(*km)
+
             for km, pr in self.generic_shortcuts.get(name, []):
                 self._add_shortcut(km, ctx, name, -pr, True)
 
@@ -144,21 +148,40 @@ class Activator(object):
                 self._add_shortcut(km, ctx, name, -pr, False)
 
     def activate(self, group, window, key, modifier):
-        for _, ctx, name, _ in self.shortcuts[(key, modifier)]:
-            ctx_obj = self.get_context(window, ctx)
+        found_priority = 10000
+        actions = []
+        cache = self.get_context_cache(window)
+
+        for pr, ctx, name, _ in self.shortcuts[(key, modifier)]:
+            if pr > found_priority:
+                break
+
+            ctx_obj = self._find_context(ctx, cache)
             if ctx_obj:
                 try:
-                    cb, args = self.actions[ctx][name]
+                    cb, args, label = self.actions[ctx][name]
                 except KeyError:
                     if name[0] == '!':
                         name, _, param = name.partition('/')
-                        _, resolver = self.actions[ctx][name]
-                        cb, args = resolver(param), ()
+                        _, resolver, menu_path = self.actions[ctx][name]
+                        cb, label = resolver(param)
+                        if menu_path:
+                            label = menu_path + '/' + label
+                        args = ()
                     else:
                         raise KeyError('%s %s' % (ctx, name))
 
+                actions.append((ctx, name, label, cb, ctx_obj, args))
+                if pr < found_priority:
+                    found_priority = pr
+
+        if actions:
+            if len(actions) == 1:
+                _, _, _, cb, ctx_obj, args
                 result = cb(ctx_obj, *args)
                 return result is None or result
+            else:
+                show_dups_menu(actions, window, self, cache)
 
         return False
 
@@ -167,7 +190,7 @@ class Activator(object):
         if name.startswith('!'):
             obj()
         else:
-            cb, args = self.actions[ctx][name]
+            cb, args, _ = self.actions[ctx][name]
             cb(obj, *args)
 
     def on_menu_key_press(self, menu, event):
@@ -212,23 +235,23 @@ class Activator(object):
         cache[ctx] = result
         return result
 
-    def get_context(self, window, ctx):
-        return self._find_context(ctx, {'window':window, 'window-activator':(window, self)})
+    def get_context_cache(self, window):
+        return {'window':window, 'window-activator':(window, self)}
 
-    def get_km_for_action(self, ctx, name, return_all=False):
+    def get_context(self, window, ctx):
+        return self._find_context(ctx, self.get_context_cache(window))
+
+    def get_km_for_action(self, ctx, name):
         result = []
         for km, actions in self.shortcuts.iteritems():
             for pr, actx, aname, is_generic in actions:
                 if ctx == actx and name == aname:
                     result.append((km, pr, is_generic))
 
-                if not return_all:
-                    break
-
         return result
 
-    def get_allowed_actions(self, window, path):
-        cache = {'window':window, 'window-activator':(window, self)}
+    def get_allowed_actions(self, window, path, cache=None):
+        cache = cache or self.get_context_cache(window)
 
         def get_actions(entries, path):
             entries, data, _, _ = entries
@@ -246,7 +269,7 @@ class Activator(object):
                     ctx_obj = self._find_context(ctx, cache)
                     if ctx_obj:
                         if name.startswith('!'):
-                            cb, args = self.actions[ctx][name]
+                            cb, args, _ = self.actions[ctx][name]
                             for lb, action_name, action_cb in cb(ctx_obj):
                                 yield (lb, 'item',
                                     (ctx, '%s/%s' % (name, action_name), action_cb))
@@ -324,23 +347,44 @@ def fill_menu(menu, window, activator, actions):
     menu.connect('key-press-event', activator.on_menu_key_press)
     menu.show_all()
 
+def actions_menu_resolver(path=''):
+    return show_actions_menu(path), path
+
+def popup_menu(menu, window):
+    def get_coords(menu):
+        win = window.window
+        x, y, w, h, _ = win.get_geometry()
+        x, y = win.get_origin()
+        mw, mh = menu.size_request()
+        return x + w - mw, y + h - mh, False
+
+    menu.popup(None, None, get_coords, 0, gtk.get_current_event_time())
+
 def show_actions_menu(path=''):
     def inner(args):
         window, activator = args
         actions = activator.get_allowed_actions(window, path)
 
-        def get_coords(menu):
-            win = window.window
-            x, y, w, h, _ = win.get_geometry()
-            x, y = win.get_origin()
-            mw, mh = menu.size_request()
-            return x + w - mw, y + h - mh, False
-
         menu = gtk.Menu()
         fill_menu(menu, window, activator, actions)
-        menu.popup(None, None, get_coords, 0, gtk.get_current_event_time())
+        popup_menu(menu, window)
 
     return inner
+
+def show_dups_menu(dups, window, activator, context_cache):
+    actions = []
+    for ctx, name, label, _, obj, _ in dups:
+        label = label.replace('_', '').replace('$', '')
+        if name == '!show-menu':
+            actions.append((label, 'menu',
+                (label, activator.get_allowed_actions(window, label, context_cache))))
+
+        else:
+            actions.append((label, 'item', (ctx, name, obj)))
+
+    menu = gtk.Menu()
+    fill_menu(menu, window, activator, actions)
+    popup_menu(menu, window)
 
 
 class ShortcutChangeDialog(gtk.Window):
@@ -372,7 +416,7 @@ class ShortcutChangeDialog(gtk.Window):
             self.default_model = None
 
         view, self.ctx_model = self.create_view(
-            ctx, ((r[0], -r[1]) for r in activator.get_km_for_action(ctx, name, True) if not r[2]))
+            ctx, ((r[0], -r[1]) for r in activator.get_km_for_action(ctx, name) if not r[2]))
         box.pack_start(view)
 
     def add_rows_if_needed(self, model):
