@@ -1,19 +1,20 @@
 # -*- coding: utf-8 -*-
 from bisect import bisect
 import gtk
+from gtk.keysyms import F2
 
 class ContextHolder():
     def __init__(self, activator, context):
         self.activator = activator
         self.context = context
 
-    def map(self, name, accel, priority=0):
+    def map(self, name, accel, priority=None):
         self.activator.map(self.context, name, accel, priority)
 
     def bind(self, name, menu_entry, callback, *args):
         self.activator.bind(self.context, name, menu_entry, callback, *args)
 
-    def bind_accel(self, name, menu_entry, accel, callback, priority=0, *args):
+    def bind_accel(self, name, menu_entry, accel, callback, priority=None, *args):
         self.activator.bind_accel(self.context, name, menu_entry, accel, callback, priority, *args)
 
     def __enter__(self):
@@ -29,11 +30,13 @@ class Activator(object):
         self.shortcuts = {}
         self.generic_shortcuts = {}
         self.contexts = {}
-        self.menu_entries = []
-        self.menu_entries_tail_len = 0
+        self.menu_entries = [[], {}, 0, 'Root']
+        self.dyn_menu = {}
 
         self.bind_accel('window-activator', 'root-menu', 'Root menu',
-            '<ctrl>1', show_actions_menu())
+            '<ctrl>1', show_actions_menu(''))
+
+        self.bind_menu('window-activator', 'show-menu', None, None, show_actions_menu)
 
     def attach(self, window):
         window.add_accel_group(self.accel_group)
@@ -50,7 +53,7 @@ class Activator(object):
     def on(self, context):
         return ContextHolder(self, context)
 
-    def bind_accel(self, ctx, name, menu_entry, accel, callback, priority=0, *args):
+    def bind_accel(self, ctx, name, menu_entry, accel, callback, priority=None, *args):
         self.bind(ctx, name, menu_entry, callback, *args)
         self.map(ctx, name, accel, priority)
 
@@ -58,13 +61,36 @@ class Activator(object):
         shortcuts = self.shortcuts.setdefault(km, [])
         shortcuts.insert(bisect(shortcuts, priority), (priority, ctx, name))
 
-    def add_menu_entry(self, ctx, name, menu_entry):
-        if menu_entry.startswith('$'):
-            self.menu_entries_tail_len += 1
-            self.menu_entries.append((ctx, name, menu_entry[1:]))
+    def get_menu_entry_list(self, entries, label, new_value):
+        entry = label.replace('_', '').lstrip('$')
+        try:
+            return entries[1][entry]
+        except KeyError:
+            pass
+
+        if new_value:
+            if label.startswith('$'):
+                entries[2] += 1
+                entries[0].append(entry)
+            else:
+                idx = len(entries[0]) - entries[2]
+                entries[0].insert(idx, entry)
+
+            v = new_value(label.lstrip('$'))
+            entries[1][entry] = v
+            return v
         else:
-            idx = len(self.menu_entries) - self.menu_entries_tail_len
-            self.menu_entries.insert(idx, (ctx, name, menu_entry))
+            raise KeyError(label)
+
+    def add_menu_entry(self, ctx, name, menu_entry):
+        items = menu_entry.split('/')
+        entries = self.menu_entries
+
+        new_submenu = lambda l: [[], {}, 0, l]
+        for r in items[:-1]:
+            entries = self.get_menu_entry_list(entries, r, new_submenu)
+
+        self.get_menu_entry_list(entries, items[-1], lambda l:(ctx, name, l))
 
     def bind(self, ctx, name, menu_entry, callback, *args):
         self.actions.setdefault(ctx, {})[name] = callback, args
@@ -74,7 +100,22 @@ class Activator(object):
             for km, priority in self.generic_shortcuts[name]:
                 self._add_shortcut(km, ctx, name, -priority)
 
-    def map(self, ctx, name, accel, priority=0):
+    def bind_menu(self, ctx, name, menu_entry, generator, resolver):
+        name = '!' + name
+
+        if menu_entry:
+            menu_entry = menu_entry + '/_entries'
+            self.add_menu_entry(ctx, name, menu_entry)
+
+        self.actions.setdefault(ctx, {})[name] = generator, resolver
+
+    def map_menu(self, path, accel, priority=None):
+        self.map('window-activator', '!show-menu/' + path, accel, priority)
+
+    def map(self, ctx, name, accel, priority=None):
+        if priority is None:
+            priority = 0
+
         key, modifier = km = gtk.accelerator_parse(accel)
         if key == 0:
             import warnings
@@ -90,18 +131,37 @@ class Activator(object):
         for _, ctx, name in self.shortcuts[(key, modifier)]:
             ctx_obj = self.get_context(window, ctx)
             if ctx_obj:
-                cb, args = self.actions[ctx][name]
+                try:
+                    cb, args = self.actions[ctx][name]
+                except KeyError:
+                    if name[0] == '!':
+                        name, _, param = name.partition('/')
+                        _, resolver = self.actions[ctx][name]
+                        cb, args = resolver(param), ()
+                    else:
+                        raise KeyError('%s %s' % (ctx, name))
+
                 result = cb(ctx_obj, *args)
                 return result is None or result
 
         return False
 
-    def activate_action(self, item, ctx, name, ctx_obj):
+    def activate_menu_item(self, item):
+        ctx, name, obj = item.activate_context
         if name.startswith('!'):
-            ctx_obj()
+            obj()
         else:
             cb, args = self.actions[ctx][name]
-            cb(ctx_obj, *args)
+            cb(obj, *args)
+
+    def on_menu_key_press(self, menu, event):
+        if event.keyval == F2:
+            item = getattr(menu, 'current_item', None)
+            if item:
+                print item.activate_context, self.get_km_for_action(*item.activate_context[:2])
+                return True
+
+        return False
 
     def _find_context(self, ctx, cache):
         try:
@@ -147,46 +207,45 @@ class Activator(object):
         return result
 
     def get_allowed_actions(self, window, path):
-        cache = {'window':window}
+        cache = {'window':window, 'window-activator':(window, self)}
 
-        def get_actions(path):
-            if path and not path.endswith('/'):
-                path = path + '/'
+        def get_actions(entries, path):
+            entries, data, _, _ = entries
+            if path:
+                path += '/'
 
-            plen = len(path)
+            for entry in entries:
+                if not path and entry == 'Root menu': continue
 
-            actions = []
-            added_submenus = set()
-            for ctx, name, entry in self.menu_entries:
-                if entry == 'Root menu':
-                    continue
+                v = data[entry]
+                if isinstance(v, list):
+                    yield v[-1], 'menu', (path + entry, get_actions(v, path + entry))
+                else:
+                    ctx, name, label = v
+                    ctx_obj = self._find_context(ctx, cache)
+                    if ctx_obj:
+                        if name.startswith('!'):
+                            cb, args = self.actions[ctx][name]
+                            for lb, action_name, action_cb in cb(ctx_obj):
+                                yield (lb, 'item',
+                                    (ctx, '%s/%s' % (name, action_name), action_cb))
+                        else:
+                            yield label, 'item', (ctx, name, ctx_obj)
 
-                if entry.startswith(path):
-                    items = entry[plen:].split('/')
-                    label = items[0]
-                    if len(items) > 1:
-                        if label not in added_submenus:
-                            actions.append((label, get_actions(path + label)))
-                            added_submenus.add(label)
-                    else:
-                        ctx_obj = self._find_context(ctx, cache)
-                        if ctx_obj:
-                            if name.startswith('!'):
-                                cb, args = self.actions[ctx][name]
-                                for label, action_cb in cb(ctx_obj, *args):
-                                    actions.append((label, (ctx, name, action_cb)))
-                            else:
-                                actions.append((label, (ctx, name, ctx_obj)))
+        entries = self.menu_entries
+        if path:
+            for r in path.split('/'):
+                entries = self.get_menu_entry_list(entries, r, None)
 
-            for a in actions:
-                yield a
-
-        return get_actions(path)
+        return get_actions(entries, path)
 
     def add_context(self, ctx, depends, callback):
         if isinstance(depends, str):
             depends = (depends,)
         self.contexts[ctx] = depends, callback
+
+def on_item_select(item, is_select):
+    item.get_parent().current_item = item if is_select else None
 
 def fill_menu(menu, window, activator, actions):
     menu.set_reserve_toggle_size(False)
@@ -197,8 +256,8 @@ def fill_menu(menu, window, activator, actions):
             fill_menu(menu, window, activator, items)
             menu.already_filled = True
 
-    for label, v in actions:
-        if isinstance(v, tuple):
+    for label, t, v in actions:
+        if t == 'item':
             km = activator.get_km_for_action(*v[:2])
             submenu = None
         else:
@@ -229,13 +288,18 @@ def fill_menu(menu, window, activator, actions):
             item = gtk.MenuItem(label, True)
 
         if submenu:
+            item.activate_context = 'window-activator', '!show-menu/' + v[0]
             item.set_submenu(submenu)
-            item.connect('activate', activate_sub_menu, v)
+            item.connect('activate', activate_sub_menu, v[1])
         else:
-            item.connect('activate', activator.activate_action, *v)
+            item.activate_context = v
+            item.connect('activate', activator.activate_menu_item)
 
+        item.connect_after('select', on_item_select, True)
+        item.connect_after('deselect', on_item_select, False)
         menu.append(item)
 
+    menu.connect('key-press-event', activator.on_menu_key_press)
     menu.show_all()
 
 def show_actions_menu(path=''):
