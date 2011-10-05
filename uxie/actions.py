@@ -162,12 +162,14 @@ class Activator(object):
                     cb, args, label = self.actions[ctx][name]
                 except KeyError:
                     if name[0] == '!':
-                        name, _, param = name.partition('/')
-                        _, resolver, menu_path = self.actions[ctx][name]
-                        cb, label = resolver(param)
+                        dname, _, param = name.partition('/')
+                        _, resolver, menu_path = self.actions[ctx][dname]
+                        cb, args, label = resolver(ctx_obj, param)
+                        if not cb:
+                            continue
+
                         if menu_path:
                             label = menu_path + '/' + label
-                        args = ()
                     else:
                         raise KeyError('%s %s' % (ctx, name))
 
@@ -177,7 +179,7 @@ class Activator(object):
 
         if actions:
             if len(actions) == 1:
-                _, _, _, cb, ctx_obj, args
+                _, _, _, cb, ctx_obj, args = actions[0]
                 result = cb(ctx_obj, *args)
                 return result is None or result
             else:
@@ -187,11 +189,15 @@ class Activator(object):
 
     def activate_menu_item(self, item):
         ctx, name, obj = item.activate_context
-        if name.startswith('!'):
-            obj()
-        else:
-            cb, args, _ = self.actions[ctx][name]
+        if isinstance(obj, tuple):
+            obj, cb, args = obj
             cb(obj, *args)
+        else:
+            if name.startswith('!'):
+                obj()
+            else:
+                cb, args, _ = self.actions[ctx][name]
+                cb(obj, *args)
 
     def on_menu_key_press(self, menu, event):
         if event.keyval == F2:
@@ -347,8 +353,8 @@ def fill_menu(menu, window, activator, actions):
     menu.connect('key-press-event', activator.on_menu_key_press)
     menu.show_all()
 
-def actions_menu_resolver(path=''):
-    return show_actions_menu(path), path
+def actions_menu_resolver(ctx, path=''):
+    return show_actions_menu(path), (), path
 
 def popup_menu(menu, window):
     def get_coords(menu):
@@ -373,14 +379,14 @@ def show_actions_menu(path=''):
 
 def show_dups_menu(dups, window, activator, context_cache):
     actions = []
-    for ctx, name, label, _, obj, _ in dups:
+    for ctx, name, label, cb, obj, args in dups:
         label = label.replace('_', '').replace('$', '')
-        if name == '!show-menu':
+        if name.startswith('!show-menu/'):
             actions.append((label, 'menu',
                 (label, activator.get_allowed_actions(window, label, context_cache))))
 
         else:
-            actions.append((label, 'item', (ctx, name, obj)))
+            actions.append((label, 'item', (ctx, name, (obj, cb, args))))
 
     menu = gtk.Menu()
     fill_menu(menu, window, activator, actions)
