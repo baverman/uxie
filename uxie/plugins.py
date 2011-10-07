@@ -15,8 +15,8 @@ class Injector(object):
     def on_done(self, name, callback):
         return self.plugin_manager.on_done(name, callback)
 
-    def on(self, context):
-        return self.activator.on(context)
+    def on(self, *context):
+        return self.activator.on(*context)
 
     def bind_accel(self, ctx, name, menu_entry, accel, callback, priority=None, *args):
         return self.activator.bind_accel(ctx, name, menu_entry, accel, callback, priority, *args)

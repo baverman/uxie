@@ -24,7 +24,7 @@ class ContextHolder():
         pass
 
 class Activator(object):
-    def __init__(self):
+    def __init__(self, window=None):
         self.accel_group = gtk.AccelGroup()
         self.actions = {}
         self.shortcuts = {}
@@ -33,10 +33,13 @@ class Activator(object):
         self.menu_entries = [[], {}, 0, 'Root']
         self.dyn_menu = {}
 
-        self.bind_accel('window-activator', 'root-menu', 'Root menu',
+        self.bind_accel(('window', 'activator'), 'root-menu', 'Root menu',
             '<ctrl>1', show_actions_menu(''))
 
-        self.bind_menu('window-activator', 'show-menu', None, None, actions_menu_resolver)
+        self.bind_menu(('window', 'activator'), 'show-menu', None, None, actions_menu_resolver)
+
+        if window:
+            self.attach(window)
 
     def attach(self, window):
         window.add_accel_group(self.accel_group)
@@ -50,10 +53,17 @@ class Activator(object):
 
         return False
 
-    def on(self, context):
+    def on(self, *context):
         return ContextHolder(self, context)
 
+    def normalize_context(self, ctx):
+        if isinstance(ctx, tuple):
+            return ctx
+        else:
+            return (ctx,)
+
     def bind_accel(self, ctx, name, menu_entry, accel, callback, priority=None, *args):
+        ctx = self.normalize_context(ctx)
         self.bind(ctx, name, menu_entry, callback, *args)
         self.map(ctx, name, accel, priority)
 
@@ -96,6 +106,7 @@ class Activator(object):
         self.get_menu_entry_list(entries, items[-1], lambda l:(ctx, name, l))
 
     def bind(self, ctx, name, menu_entry, callback, *args):
+        ctx = self.normalize_context(ctx)
         self.actions.setdefault(ctx, {})[name] = callback, args, menu_entry
         self.add_menu_entry(ctx, name, menu_entry)
 
@@ -104,6 +115,7 @@ class Activator(object):
                 self._add_shortcut(km, ctx, name, -priority, True)
 
     def bind_menu(self, ctx, name, menu_entry, generator, resolver):
+        ctx = self.normalize_context(ctx)
         name = '!' + name
 
         if menu_entry:
@@ -112,9 +124,10 @@ class Activator(object):
         self.actions.setdefault(ctx, {})[name] = generator, resolver, menu_entry
 
     def map_menu(self, path, accel, priority=None):
-        self.map('window-activator', '!show-menu/' + path, accel, priority)
+        self.map(('window', 'activator'), '!show-menu/' + path, accel, priority)
 
     def map(self, ctx, name, accel, priority=None):
+        ctx = self.normalize_context(ctx)
         if priority is None:
             priority = 0
 
@@ -160,11 +173,12 @@ class Activator(object):
             if ctx_obj:
                 try:
                     cb, args, label = self.actions[ctx][name]
+                    args = ctx_obj + args
                 except KeyError:
                     if name[0] == '!':
                         dname, _, param = name.partition('/')
                         _, resolver, menu_path = self.actions[ctx][dname]
-                        cb, args, label = resolver(ctx_obj, param)
+                        cb, args, label = resolver(*(ctx_obj + (param,)))
                         if not cb:
                             continue
 
@@ -173,14 +187,14 @@ class Activator(object):
                     else:
                         raise KeyError('%s %s' % (ctx, name))
 
-                actions.append((ctx, name, label, cb, ctx_obj, args))
+                actions.append((ctx, name, label, cb, args))
                 if pr < found_priority:
                     found_priority = pr
 
         if actions:
             if len(actions) == 1:
-                _, _, _, cb, ctx_obj, args = actions[0]
-                result = cb(ctx_obj, *args)
+                _, _, _, cb, args = actions[0]
+                result = cb(*args)
                 return result is None or result
             else:
                 show_dups_menu(actions, window, self, cache)
@@ -189,15 +203,15 @@ class Activator(object):
 
     def activate_menu_item(self, item):
         ctx, name, obj = item.activate_context
-        if isinstance(obj, tuple):
-            obj, cb, args = obj
-            cb(obj, *args)
+        if item.contains_all_run_data:
+            cb, args = obj
+            cb(*args)
         else:
             if name.startswith('!'):
                 obj()
             else:
                 cb, args, _ = self.actions[ctx][name]
-                cb(obj, *args)
+                cb(*(obj + args))
 
     def on_menu_key_press(self, menu, event):
         if event.keyval == F2:
@@ -213,6 +227,10 @@ class Activator(object):
         return False
 
     def _find_context(self, ctx, cache):
+        if isinstance(ctx, tuple):
+            result = tuple(self._find_context(r, cache) for r in ctx)
+            return result if len(ctx) == len(result) else None
+
         try:
             return cache[ctx]
         except KeyError:
@@ -242,7 +260,7 @@ class Activator(object):
         return result
 
     def get_context_cache(self, window):
-        return {'window':window, 'window-activator':(window, self)}
+        return {'window':window, 'activator':self}
 
     def get_context(self, window, ctx):
         return self._find_context(ctx, self.get_context_cache(window))
@@ -269,18 +287,18 @@ class Activator(object):
 
                 v = data[entry]
                 if isinstance(v, list):
-                    yield v[-1], 'menu', (path + entry, get_actions(v, path + entry))
+                    yield v[-1], 'menu', False, (path + entry, get_actions(v, path + entry))
                 else:
                     ctx, name, label = v
                     ctx_obj = self._find_context(ctx, cache)
                     if ctx_obj:
                         if name.startswith('!'):
                             cb, args, _ = self.actions[ctx][name]
-                            for lb, action_name, action_cb in cb(ctx_obj):
-                                yield (lb, 'item',
-                                    (ctx, '%s/%s' % (name, action_name), action_cb))
+                            for lb, action_name, cb_and_args in cb(*ctx_obj):
+                                yield (lb, 'item', True,
+                                    (ctx, '%s/%s' % (name, action_name), cb_and_args))
                         else:
-                            yield label, 'item', (ctx, name, ctx_obj)
+                            yield label, 'item', False, (ctx, name, ctx_obj)
 
         entries = self.menu_entries
         if path:
@@ -307,12 +325,12 @@ def fill_menu(menu, window, activator, actions):
             fill_menu(menu, window, activator, items)
             menu.already_filled = True
 
-    for label, t, v in actions:
+    for label, t, ard, v in actions:
         if t == 'item':
             acontext = v
             submenu = None
         else:
-            acontext = 'window-activator', '!show-menu/' + v[0]
+            acontext = ('window', 'activator'), '!show-menu/' + v[0]
             submenu = gtk.Menu()
 
         km = activator.get_km_for_action(*acontext[:2])
@@ -345,6 +363,8 @@ def fill_menu(menu, window, activator, actions):
         else:
             item.connect('activate', activator.activate_menu_item)
 
+        item.contains_all_run_data = ard
+
         item.activate_context = acontext
         item.connect_after('select', on_item_select, True)
         item.connect_after('deselect', on_item_select, False)
@@ -353,8 +373,8 @@ def fill_menu(menu, window, activator, actions):
     menu.connect('key-press-event', activator.on_menu_key_press)
     menu.show_all()
 
-def actions_menu_resolver(ctx, path=''):
-    return show_actions_menu(path), (), path
+def actions_menu_resolver(window, activator, path=''):
+    return show_actions_menu(path), (window, activator), path
 
 def popup_menu(menu, window):
     def get_coords(menu):
@@ -367,8 +387,7 @@ def popup_menu(menu, window):
     menu.popup(None, None, get_coords, 0, gtk.get_current_event_time())
 
 def show_actions_menu(path=''):
-    def inner(args):
-        window, activator = args
+    def inner(window, activator):
         actions = activator.get_allowed_actions(window, path)
 
         menu = gtk.Menu()
@@ -379,14 +398,14 @@ def show_actions_menu(path=''):
 
 def show_dups_menu(dups, window, activator, context_cache):
     actions = []
-    for ctx, name, label, cb, obj, args in dups:
+    for ctx, name, label, cb, args in dups:
         label = label.replace('_', '').replace('$', '')
         if name.startswith('!show-menu/'):
-            actions.append((label, 'menu',
+            actions.append((label, 'menu', False,
                 (label, activator.get_allowed_actions(window, label, context_cache))))
 
         else:
-            actions.append((label, 'item', (ctx, name, (obj, cb, args))))
+            actions.append((label, 'item', True, (ctx, name, (cb, args))))
 
     menu = gtk.Menu()
     fill_menu(menu, window, activator, actions)
@@ -454,7 +473,7 @@ class ShortcutChangeDialog(gtk.Window):
 
         label = gtk.Label()
         label.set_alignment(0, 0.5)
-        label.set_markup(ctx + ':')
+        label.set_markup(', '.join(ctx) + ':')
         box.pack_start(label, False, False)
 
         frame = gtk.Frame()
