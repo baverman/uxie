@@ -46,6 +46,13 @@ class Activator(object):
         window.connect('key-press-event', self.on_key_press)
 
     def on_key_press(self, window, event):
+        key = event.keyval, event.state
+        try:
+            if key in self.shortcuts and self.shortcuts[key][0][0] < 0:
+                return False
+        except IndexError:
+            pass
+
         w = window.get_focus()
         if w:
             if w.event(event):
