@@ -1,3 +1,5 @@
+import weakref
+
 class Injector(object):
     def __init__(self, activator, plugin_manager):
         self.activator = activator
@@ -47,7 +49,7 @@ class Manager(object):
         plugin.init(self.injector)
 
     def ready(self, name, obj):
-        self.ready_objects.setdefault(name, []).append(obj)
+        self.ready_objects.setdefault(name, weakref.WeakKeyDictionary())[obj] = True
         if name in self.ready_callbacks:
             for c in self.ready_callbacks[name]:
                 c(obj)
