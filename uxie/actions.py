@@ -3,6 +3,21 @@ from bisect import bisect
 import gtk
 from gtk.keysyms import F2, Escape
 
+ANY_CTX = ('any', )
+generic_shortcuts = {}
+
+def map_generic(name, accel, priority=None):
+    if priority is None:
+        priority = 0
+
+    key, modifier = km = gtk.accelerator_parse(accel)
+    if key == 0:
+        import warnings
+        warnings.warn("Can't parse %s" % accel)
+
+    generic_shortcuts.setdefault(name, []).append((km, priority))
+
+
 class ContextHolder():
     def __init__(self, activator, context):
         self.activator = activator
@@ -28,14 +43,11 @@ class Activator(object):
         self.accel_group = gtk.AccelGroup()
         self.actions = {}
         self.shortcuts = {}
-        self.generic_shortcuts = {}
         self.contexts = {}
         self.menu_entries = [[], {}, 0, 'Root']
         self.dyn_menu = {}
 
-        self.bind_accel(('window', 'activator'), 'root-menu', 'Root menu',
-            '<ctrl>1', show_actions_menu(''))
-
+        self.bind(('window', 'activator'), 'root-menu', 'Root menu', show_actions_menu(''))
         self.bind_menu(('window', 'activator'), 'show-menu', None, None, actions_menu_resolver)
 
         if window:
@@ -115,10 +127,12 @@ class Activator(object):
     def bind(self, ctx, name, menu_entry, callback, *args):
         ctx = self.normalize_context(ctx)
         self.actions.setdefault(ctx, {})[name] = callback, args, menu_entry
-        self.add_menu_entry(ctx, name, menu_entry)
 
-        if name in self.generic_shortcuts:
-            for km, priority in self.generic_shortcuts[name]:
+        if menu_entry:
+            self.add_menu_entry(ctx, name, menu_entry)
+
+        if name in generic_shortcuts:
+            for km, priority in generic_shortcuts[name]:
                 self._add_shortcut(km, ctx, name, -priority, True)
 
     def bind_menu(self, ctx, name, menu_entry, generator, resolver):
@@ -134,6 +148,8 @@ class Activator(object):
         self.map(('window', 'activator'), '!show-menu/' + path, accel, priority)
 
     def map(self, ctx, name, accel, priority=None):
+        assert ctx is not None
+
         ctx = self.normalize_context(ctx)
         if priority is None:
             priority = 0
@@ -143,16 +159,13 @@ class Activator(object):
             import warnings
             warnings.warn("Can't parse %s" % accel)
 
-        if ctx is None:
-            self.generic_shortcuts.setdefault(name, []).append((km, priority))
-        else:
-            self._add_shortcut(km, ctx, name, -priority, False)
+        self._add_shortcut(km, ctx, name, -priority, False)
 
     def replace_keys(self, ctx, name, keys):
         if not ctx:
-            self.generic_shortcuts.setdefault(name, [])[:] = []
+            generic_shortcuts.setdefault(name, [])[:] = []
             for km, pr in keys:
-                self.generic_shortcuts[name].append((km, pr))
+                generic_shortcuts[name].append((km, pr))
         else:
             for km in self.shortcuts:
                 actions = self.shortcuts[km]
@@ -161,7 +174,7 @@ class Activator(object):
                 if not actions:
                     self.accel_group.disconnect_key(*km)
 
-            for km, pr in self.generic_shortcuts.get(name, []):
+            for km, pr in generic_shortcuts.get(name, []):
                 self._add_shortcut(km, ctx, name, -pr, True)
 
             for km, pr in keys:
@@ -177,7 +190,7 @@ class Activator(object):
                 break
 
             ctx_obj = self._find_context(ctx, cache)
-            if ctx_obj:
+            if ctx_obj is not None:
                 try:
                     cb, args, label = self.actions[ctx][name]
                     args = ctx_obj + args
@@ -234,6 +247,9 @@ class Activator(object):
         return False
 
     def _find_context(self, ctx, cache):
+        if ctx == ANY_CTX:
+            return ()
+
         if isinstance(ctx, tuple):
             result = tuple(self._find_context(r, cache) for r in ctx)
             return result if len(ctx) == len(result) else None
@@ -253,7 +269,7 @@ class Activator(object):
             args = []
             for dctx in depends:
                 d = self._find_context(dctx, cache)
-                if not d:
+                if d is None:
                     result = None
                     break
 
@@ -298,7 +314,7 @@ class Activator(object):
                 else:
                     ctx, name, label = v
                     ctx_obj = self._find_context(ctx, cache)
-                    if ctx_obj:
+                    if ctx_obj is not None:
                         if name.startswith('!'):
                             cb, args, _ = self.actions[ctx][name]
                             for lb, action_name, cb_and_args in cb(*ctx_obj):
@@ -391,7 +407,8 @@ def popup_menu(menu, window):
         mw, mh = menu.size_request()
         return x + w - mw, y + h - mh, False
 
-    menu.popup(None, None, get_coords, 0, gtk.get_current_event_time())
+    if menu.get_children():
+        menu.popup(None, None, get_coords, 0, gtk.get_current_event_time())
 
 def show_actions_menu(path=''):
     def inner(window, activator):
@@ -441,8 +458,8 @@ class ShortcutChangeDialog(gtk.Window):
         label.set_width_chars(40)
         box.pack_start(label, False, False)
 
-        if name in activator.generic_shortcuts:
-            view, self.default_model = self.create_view('default', activator.generic_shortcuts[name])
+        if name in generic_shortcuts:
+            view, self.default_model = self.create_view('default', generic_shortcuts[name])
             box.pack_start(view)
         else:
             self.default_model = None
