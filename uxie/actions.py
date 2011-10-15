@@ -252,7 +252,7 @@ class Activator(object):
 
         if isinstance(ctx, tuple):
             result = tuple(self._find_context(r, cache) for r in ctx)
-            return result if len(ctx) == len(result) else None
+            return None if any(r is None for r in result) else result
 
         try:
             return cache[ctx]
