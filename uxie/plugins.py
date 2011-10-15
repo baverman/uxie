@@ -46,7 +46,11 @@ class Manager(object):
 
     def add_plugin(self, plugin):
         self.plugins.append(plugin)
-        plugin.init(self.injector)
+        try:
+            plugin.init(self.injector)
+        except:
+            import traceback
+            traceback.print_exc()
 
     def ready(self, name, obj):
         self.ready_objects.setdefault(name, weakref.WeakKeyDictionary())[obj] = True
