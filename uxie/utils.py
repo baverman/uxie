@@ -1,6 +1,8 @@
 import os
 from os.path import join, dirname, exists, expanduser
 
+import weakref
+
 import gobject
 import gtk
 
@@ -51,3 +53,59 @@ def human_size(num):
         if num < 1024.0:
             return "%g %s" % (round(num, 1), x)
         num /= 1024.0
+
+
+class WeakCallback(object):
+    def __init__(self, obj, func, idle):
+        self.wref = weakref.ref(obj)
+        self.func = func
+        self.gobject_token = None
+        self.idle = idle
+
+    def __call__(self, *args, **kwargs):
+        obj = self.wref()
+        if obj:
+            if self.idle is False or self.idle is None:
+                return self.func(obj, *args, **kwargs)
+            elif self.idle is True:
+                idle(self.func, *((obj,)+args), **kwargs)
+            else:
+                idle(self.func, priority=self.idle, *((obj,)+args), **kwargs)
+
+        elif self.gobject_token:
+            sender = args[0]
+            sender.disconnect(self.gobject_token)
+            self.gobject_token = None
+
+        return False
+
+
+def _idle_call(*args):
+    callback, arguments, priority = args[-3:]
+    args = args[:-3] + arguments
+    if priority is True:
+        idle(callback, *args)
+    else:
+        idle(callback, priority=idle, *args)
+
+    return False
+
+def connect(sender, signal, callback, idle=False, after=False, *args):
+    try:
+        obj = callback.im_self
+    except AttributeError:
+        if idle is not False:
+            cb, args = _idle_call, (callback, args, idle)
+
+        if after:
+            return sender.connect_after(signal, cb, *args)
+        else:
+            return sender.connect(signal, cb, *args)
+
+    wc = WeakCallback(obj, callback.im_func, idle)
+    if after:
+        wc.gobject_token = sender.connect_after(signal, wc, *args)
+    else:
+        wc.gobject_token = sender.connect(signal, wc, *args)
+
+    return wc.gobject_token
