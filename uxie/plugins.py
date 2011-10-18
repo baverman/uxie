@@ -63,8 +63,8 @@ class Manager(object):
 
     def done(self, name, obj):
         try:
-            self.ready_objects.setdefault(name, []).remove(obj)
-        except ValueError:
+            del self.ready_objects[name][obj]
+        except KeyError:
             pass
 
         if name in self.done_callbacks:
