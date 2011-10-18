@@ -29,6 +29,9 @@ class Injector(object):
     def map(self, ctx, name, accel, priority=None):
         return self.activator.map(ctx, name, accel, priority)
 
+    def bind_menu(self, ctx, name, menu_entry, generator, resolver):
+        return self.activator.bind_menu(ctx, name, menu_entry, generator, resolver)
+
     def map_menu(self, path, accel, priority=None):
         return self.activator.map_menu(path, accel, priority)
 
