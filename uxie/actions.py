@@ -4,26 +4,89 @@ import gtk
 from gtk.keysyms import F2, Escape, Control_L, Control_R, Alt_L, Alt_R, Shift_L, Shift_R
 from gtk.gdk import SHIFT_MASK, CONTROL_MASK, MOD1_MASK
 
+from .utils import make_missing_dirs
+
 ANY_CTX = ('any', )
+DEFAULT_PRIORITY = 0
+
+def parse_accel(accel, priority=None):
+    if priority is None:
+        priority = DEFAULT_PRIORITY
+
+    key, modifier = km = gtk.accelerator_parse(accel)
+    if key == 0:
+        import warnings
+        warnings.warn("Can't parse %s" % accel)
+
+    return km, priority
+
 
 class KeyMap(object):
-    def __init__(self):
+    def __init__(self, config_filename=None):
         self.generic_shortcuts = {}
+        self.config = {}
+        self.config_filename = config_filename
+
+        if config_filename:
+            self._load()
+
+        self.changed_generics = self.config.setdefault('generic', {})
+        self.default_generics = {}
+        self._map_changed_generics()
+
+    def _load(self):
+        self.config.clear()
+        try:
+            execfile(self.config_filename, {}, self.config)
+        except IOError:
+            pass
+        except:
+            import traceback
+            traceback.print_exc()
+
+    def _map_changed_generics(self):
+        for name, r in self.changed_generics.iteritems():
+            for accel, priority in r:
+                self._map_generic(name, accel, priority)
+
+    def _map_generic(self, name, accel, priority=None):
+        self.generic_shortcuts.setdefault(name, []).append(parse_accel(accel, priority))
 
     def map_generic(self, name, accel, priority=None):
-        if priority is None:
-            priority = 0
+        if name in self.changed_generics:
+            self.default_generics.setdefault(name, []).append(parse_accel(accel, priority))
+        else:
+            self._map_generic(name, accel, priority)
 
-        key, modifier = km = gtk.accelerator_parse(accel)
-        if key == 0:
-            import warnings
-            warnings.warn("Can't parse %s" % accel)
-
-        self.generic_shortcuts.setdefault(name, []).append((km, priority))
-
-    def get_activator(self, window=None, config=None):
+    def get_activator(self, window=None, config_section=None):
+        config = self.config.setdefault(config_section, {}) if config_section else {}
         return Activator(self, window, config)
 
+    def replace_generics(self, name, keys):
+        if name in self.default_generics and set(self.default_generics[name]) == set(keys):
+            if name in self.changed_generics:
+                del self.changed_generics[name]
+        else:
+            self.changed_generics[name] = [(gtk.accelerator_name(*km), pr) for km, pr in keys]
+
+        self.generic_shortcuts.setdefault(name, [])[:] = []
+        for km, pr in keys:
+            self.generic_shortcuts[name].append((km, pr))
+
+    def save(self):
+        if not self.config_filename:
+            return
+
+        make_missing_dirs(self.config_filename)
+        with open(self.config_filename, 'w') as f:
+            for section, data in self.config.iteritems():
+                if section.startswith('_'):
+                    continue
+
+                print >> f, '%s = {' % section
+                for name, shortcuts in data.iteritems():
+                    print >> f, '    %s: %s,' % (repr(name), repr(shortcuts))
+                print >> f, '}\n'
 
 class ContextHolder(object):
     def __init__(self, activator, context):
@@ -46,14 +109,20 @@ class ContextHolder(object):
         pass
 
 class Activator(object):
-    def __init__(self, keymap, window=None, config=None):
+    def __init__(self, keymap, window=None, changed_shortcuts=None):
         self.accel_group = gtk.AccelGroup()
         self.actions = {}
         self.shortcuts = {}
         self.contexts = {}
         self.menu_entries = [[], {}, 0, 'Root']
         self.dyn_menu = {}
+
+        self.keymap = keymap
         self.generic_shortcuts = keymap.generic_shortcuts
+
+        self.default_shortcuts = {}
+        self.changed_shortcuts = changed_shortcuts
+        self._map_changed_shortcuts()
 
         self.bind(('window', 'activator'), 'root-menu', 'Root menu', show_actions_menu(''))
         self.bind_menu(('window', 'activator'), 'show-menu', None, None, actions_menu_resolver)
@@ -88,6 +157,12 @@ class Activator(object):
             return ctx
         else:
             return (ctx,)
+
+    def _map_changed_shortcuts(self):
+        if self.changed_shortcuts:
+            for (ctx, name), r in self.changed_shortcuts.iteritems():
+                for accel, priority in r:
+                    self._map(ctx, name, accel, priority)
 
     def bind_accel(self, ctx, name, menu_entry, accel, callback, priority=None, *args):
         ctx = self.normalize_context(ctx)
@@ -155,38 +230,39 @@ class Activator(object):
     def map_menu(self, path, accel, priority=None):
         self.map(('window', 'activator'), '!show-menu/' + path, accel, priority)
 
-    def map(self, ctx, name, accel, priority=None):
-        assert ctx is not None
-
-        ctx = self.normalize_context(ctx)
-        if priority is None:
-            priority = 0
-
-        key, modifier = km = gtk.accelerator_parse(accel)
-        if key == 0:
-            import warnings
-            warnings.warn("Can't parse %s" % accel)
-
+    def _map(self, ctx, name, accel, priority=None):
+        km, priority = parse_accel(accel, priority)
         self._add_shortcut(km, ctx, name, -priority, False)
 
-    def replace_keys(self, ctx, name, keys):
-        if not ctx:
-            self.generic_shortcuts.setdefault(name, [])[:] = []
-            for km, pr in keys:
-                self.generic_shortcuts[name].append((km, pr))
+    def map(self, ctx, name, accel, priority=None):
+        assert ctx is not None
+        ctx = self.normalize_context(ctx)
+        key = ctx, name
+        if key in self.changed_shortcuts:
+            self.default_shortcuts.setdefault(key, []).append(parse_accel(accel, priority))
         else:
-            for km in self.shortcuts:
-                actions = self.shortcuts[km]
-                actions[:] = [r for r in actions if r[1] != ctx or r[2] != name]
+            self._map(ctx, name, accel, priority)
 
-                if not actions:
-                    self.accel_group.disconnect_key(*km)
+    def replace_keys(self, ctx, name, keys):
+        key = ctx, name
+        if key in self.default_shortcuts and set(self.default_shortcuts[key]) == set(keys):
+            if key in self.default_shortcuts:
+                del self.default_shortcuts[key]
+        else:
+            self.changed_shortcuts[key] = [(gtk.accelerator_name(*km), pr) for km, pr in keys]
 
-            for km, pr in self.generic_shortcuts.get(name, []):
-                self._add_shortcut(km, ctx, name, -pr, True)
+        for km in self.shortcuts:
+            actions = self.shortcuts[km]
+            actions[:] = [r for r in actions if r[1] != ctx or r[2] != name]
 
-            for km, pr in keys:
-                self._add_shortcut(km, ctx, name, -pr, False)
+            if not actions:
+                self.accel_group.disconnect_key(*km)
+
+        for km, pr in self.generic_shortcuts.get(name, []):
+            self._add_shortcut(km, ctx, name, -pr, True)
+
+        for km, pr in keys:
+            self._add_shortcut(km, ctx, name, -pr, False)
 
     def activate(self, group, window, key, modifier):
         found_priority = 10000
@@ -511,7 +587,7 @@ class ShortcutChangeDialog(gtk.Window):
         box.pack_start(label, False, False)
 
         if name in self.activator.generic_shortcuts:
-            view, self.default_model = self.create_view('default',
+            view, self.default_model = self.create_view(('default',),
                 self.activator.generic_shortcuts[name])
             box.pack_start(view)
         else:
@@ -590,9 +666,10 @@ class ShortcutChangeDialog(gtk.Window):
     def quit(self, *args):
         ctx, name = self.acontext
         if self.default_model:
-            self.activator.replace_keys(None, name, list(self.get_keys(self.default_model)))
+            self.activator.keymap.replace_generics(name, list(self.get_keys(self.default_model)))
 
         self.activator.replace_keys(ctx, name, list(self.get_keys(self.ctx_model)))
+        self.activator.keymap.save()
 
     def on_key_press_event(self, window, event):
         if event.keyval == Escape:
