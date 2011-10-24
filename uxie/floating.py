@@ -146,6 +146,12 @@ def remove_float(widget, destroy=True):
     if destroy:
         widget.destroy()
 
+def float_state_changed(widget, event):
+    if event.state != gtk.gdk.VISIBILITY_UNOBSCURED:
+        widget.window.show()
+
+    return False
+
 def add_float(parent, widget, x=None, y=None):
     widget.show_all()
     widget.set_parent(parent)
@@ -157,3 +163,5 @@ def add_float(parent, widget, x=None, y=None):
 
     widget.size_allocate_handler_id = parent.connect_after('size-allocate',
         lambda w, event: allocate_float(w.allocation, widget))
+
+    widget.connect('visibility-notify-event', float_state_changed)
