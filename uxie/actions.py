@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 from bisect import bisect
 import gtk
-from gtk.keysyms import F2, Escape
+from gtk.keysyms import F2, Escape, Control_L, Control_R, Alt_L, Alt_R, Shift_L, Shift_R
+from gtk.gdk import SHIFT_MASK, CONTROL_MASK, MOD1_MASK
 
 ANY_CTX = ('any', )
 generic_shortcuts = {}
@@ -184,6 +185,8 @@ class Activator(object):
         found_priority = 10000
         actions = []
         cache = self.get_context_cache(window)
+
+        window.last_shortcut = key, modifier
 
         for pr, ctx, name, _ in self.shortcuts[(key, modifier)]:
             if pr > found_priority:
@@ -408,6 +411,7 @@ def popup_menu(menu, window):
         return x + w - mw, y + h - mh, False
 
     if menu.get_children():
+        window.last_shortcut = None, None
         menu.popup(None, None, get_coords, 0, gtk.get_current_event_time())
 
 def show_actions_menu(path=''):
@@ -435,6 +439,47 @@ def show_dups_menu(dups, window, activator, context_cache):
     fill_menu(menu, window, activator, actions)
     popup_menu(menu, window)
 
+def wait_mod_unpress_for_last_shortcut(window, callback):
+    key, mod = window.last_shortcut
+    hid = getattr(window, 'mod_unpress_handler_id', None)
+    wmod = getattr(window, 'mod_unpress_value', None)
+    if mod:
+        if hid:
+            if not wmod:
+                window.handler_unblock(hid)
+        else:
+            window.mod_unpress_handler_id = window.connect('key-release-event',
+                wait_mod_unpress_on_window_key_release)
+
+        window.mod_unpress_value = mod
+        window.mod_unpress_callback = callback
+    else:
+        if hid and wmod:
+            window.handler_block(hid)
+            window.mod_unpress_value = None
+
+def wait_mod_unpress_on_window_key_release(window, event):
+    wmod = window.mod_unpress_value
+    mod = event.state & (CONTROL_MASK | SHIFT_MASK | MOD1_MASK)
+    keyval = event.keyval
+
+    if keyval == Shift_L or keyval == Shift_R:
+        mod &= ~SHIFT_MASK
+
+    if keyval == Control_L or keyval == Control_R:
+        mod &= ~CONTROL_MASK
+
+    if keyval == Alt_L or keyval == Alt_R:
+        mod &= ~MOD1_MASK
+
+    if wmod != mod:
+        window.handler_block(window.mod_unpress_handler_id)
+        window.mod_unpress_value = None
+        cb = window.mod_unpress_callback
+        window.mod_unpress_callback = None
+        cb()
+
+    return False
 
 class ShortcutChangeDialog(gtk.Window):
     def __init__(self, activator, ctx, name):
