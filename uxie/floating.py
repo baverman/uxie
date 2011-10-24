@@ -124,10 +124,15 @@ class TextFeedback(Feedback):
 def allocate_float(allocation, widget):
     w, h = widget.size_request()
     x, y = widget.float_pos
-    if x < 0:
+
+    if x is None:
+        x = (allocation.width - w) / 2
+    elif x < 0:
         x = allocation.width - w + x
 
-    if y < 0:
+    if y is None:
+        y = (allocation.height - h) / 2
+    elif y < 0:
         y = allocation.height - h + y
 
     calloc = gtk.gdk.Rectangle(x, y, w, h)
@@ -141,9 +146,10 @@ def remove_float(widget, destroy=True):
     if destroy:
         widget.destroy()
 
-def add_float(parent, widget, x=0, y=0):
+def add_float(parent, widget, x=None, y=None):
     widget.show_all()
     widget.set_parent(parent)
+
     widget.realize()
 
     widget.float_pos = x, y
