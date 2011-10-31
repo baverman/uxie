@@ -2,12 +2,14 @@
 from bisect import bisect
 import gtk
 from gtk.keysyms import F2, Escape, Control_L, Control_R, Alt_L, Alt_R, Shift_L, Shift_R
-from gtk.gdk import SHIFT_MASK, CONTROL_MASK, MOD1_MASK
+from gtk.gdk import SHIFT_MASK, CONTROL_MASK, MOD1_MASK, SUPER_MASK
 
 from .utils import make_missing_dirs
 
 ANY_CTX = ('any', )
 DEFAULT_PRIORITY = 0
+
+gtk.accelerator_set_default_mod_mask(SHIFT_MASK | CONTROL_MASK | MOD1_MASK | SUPER_MASK)
 
 def parse_accel(accel, priority=None):
     if priority is None:
