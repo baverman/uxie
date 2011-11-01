@@ -314,6 +314,8 @@ class Activator(object):
         return False
 
     def activate_menu_item(self, item):
+        item.get_parent().tr_window.last_shortcut = None, None
+
         ctx, name, obj = item.activate_context
         if item.contains_all_run_data:
             cb, args = obj
@@ -500,7 +502,6 @@ def popup_menu(menu, window):
         return x + w - mw, y + h - mh, False
 
     if menu.get_children():
-        window.last_shortcut = None, None
         menu.popup(None, None, get_coords, 0, gtk.get_current_event_time())
 
 def show_actions_menu(path=''):
@@ -542,10 +543,13 @@ def wait_mod_unpress_for_last_shortcut(window, callback):
 
         window.mod_unpress_value = mod
         window.mod_unpress_callback = callback
+        return True
     else:
         if hid and wmod:
             window.handler_block(hid)
             window.mod_unpress_value = None
+
+        return False
 
 def wait_mod_unpress_on_window_key_release(window, event):
     wmod = window.mod_unpress_value
