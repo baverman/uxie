@@ -179,42 +179,46 @@ class Activator(object):
         shortcuts.insert(bisect(shortcuts, priority), (priority, ctx, name, is_generic))
 
     def get_menu_entry_list(self, entries, label, new_value):
-        entry = label.replace('_', '').lstrip('$')
+        label, _, idx = label.partition('#')
+        entry = label.replace('_', '')
         try:
             return entries[1][entry]
         except KeyError:
             pass
 
         if new_value:
-            if label.startswith('$'):
-                entries[2] += 1
-                entries[0].append(entry)
+            if not idx:
+                idx = entries[2]
             else:
-                idx = len(entries[0]) - entries[2]
-                entries[0].insert(idx, entry)
+                idx = int(idx)
 
-            v = new_value(label.lstrip('$'))
+            entries[2] = idx
+            entries[0].insert(bisect([i for i, e in entries[0]], idx), (idx, entry))
+
+            v = new_value(label)
             entries[1][entry] = v
             return v
         else:
             raise KeyError(label)
 
-    def add_menu_entry(self, ctx, name, menu_entry):
+    def add_menu_entry(self, menu_entry, ctx=None, name=None):
         items = menu_entry.split('/')
         entries = self.menu_entries
 
-        new_submenu = lambda l: [[], {}, 0, l]
+        new_submenu = lambda l: [[], {}, 1, l]
         for r in items[:-1]:
             entries = self.get_menu_entry_list(entries, r, new_submenu)
 
-        self.get_menu_entry_list(entries, items[-1], lambda l:(ctx, name, l))
+        if items[-1]:
+            assert ctx is not None and name
+            self.get_menu_entry_list(entries, items[-1], lambda l:(ctx, name, l))
 
     def bind(self, ctx, name, menu_entry, callback, *args):
         ctx = self.normalize_context(ctx)
         self.actions.setdefault(ctx, {})[name] = callback, args, menu_entry
 
         if menu_entry:
-            self.add_menu_entry(ctx, name, menu_entry)
+            self.add_menu_entry(menu_entry, ctx, name)
 
         if name in self.generic_shortcuts:
             for km, priority in self.generic_shortcuts[name]:
@@ -225,7 +229,7 @@ class Activator(object):
         name = '!' + name
 
         if menu_entry:
-            self.add_menu_entry(ctx, name, menu_entry + '/_entries')
+            self.add_menu_entry(menu_entry + '/_entries', ctx, name)
 
         self.actions.setdefault(ctx, {})[name] = generator, resolver, menu_entry
 
@@ -393,7 +397,7 @@ class Activator(object):
             if path:
                 path += '/'
 
-            for entry in entries:
+            for _, entry in entries:
                 if not path and entry == 'Root menu': continue
 
                 v = data[entry]
