@@ -140,8 +140,9 @@ def allocate_float(allocation, widget):
 
 def remove_float(widget, destroy=True):
     p = widget.get_parent()
-    p.handler_disconnect(widget.size_allocate_handler_id)
-    widget.unparent()
+    if p:
+        p.handler_disconnect(widget.size_allocate_handler_id)
+        widget.unparent()
 
     if destroy:
         widget.destroy()
@@ -151,6 +152,9 @@ def float_state_changed(widget, event):
         widget.window.show()
 
     return False
+
+def on_parent_destroy(parent, widget):
+    widget.unparent()
 
 def add_float(parent, widget, x=None, y=None):
     widget.show_all()
@@ -163,5 +167,7 @@ def add_float(parent, widget, x=None, y=None):
 
     widget.size_allocate_handler_id = parent.connect_after('size-allocate',
         lambda w, event: allocate_float(w.allocation, widget))
+
+    parent.connect('destroy', on_parent_destroy, widget)
 
     widget.connect('visibility-notify-event', float_state_changed)
