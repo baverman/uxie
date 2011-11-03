@@ -1,4 +1,4 @@
-import os
+import os, sys
 from os.path import join, dirname, exists, expanduser
 
 import weakref
@@ -109,3 +109,19 @@ def connect(sender, signal, callback, idle=False, after=False, *args):
         wc.gobject_token = sender.connect(signal, wc, *args)
 
     return wc.gobject_token
+
+def lazy_func(name):
+    globs = sys._getframe(1).f_globals
+    def inner(*args, **kwargs):
+        try:
+            func = inner.func
+        except AttributeError:
+            module, _, func_name = name.rpartition('.')
+            module_name = module.lstrip('.')
+            level = len(module) - len(module_name)
+            module = __import__(module_name, globals=globs, level=level)
+            func = inner.func = getattr(module, func_name)
+
+        return func(*args, **kwargs)
+
+    return inner
