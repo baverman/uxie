@@ -116,6 +116,7 @@ class TextFeedback(Feedback):
 
         label = gtk.Label(text)
         label.set_padding(7, 5)
+        label.set_selectable(True)
         box.pack_start(label, True, True)
 
         Feedback.__init__(self, w)
