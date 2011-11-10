@@ -99,7 +99,7 @@ class TextFeedback(Feedback):
         'error': '#C55',
     }
 
-    def __init__(self, text, category=None):
+    def __init__(self, text, category=None, markup=False):
         category = category or 'info'
 
         self.timeout = max(1500, 500 + len(text)*50)
@@ -114,7 +114,12 @@ class TextFeedback(Feedback):
         fb = FlatBox(5, TextFeedback.COLORS[category])
         box.pack_start(fb, False, True)
 
-        label = gtk.Label(text)
+        if markup:
+            label = gtk.Label()
+            label.set_markup(text)
+        else:
+            label = gtk.Label(text)
+
         label.set_padding(7, 5)
         label.set_selectable(True)
         box.pack_start(label, True, True)
