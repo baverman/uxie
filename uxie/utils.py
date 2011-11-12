@@ -119,8 +119,15 @@ def lazy_func(name):
             module, _, func_name = name.rpartition('.')
             module_name = module.lstrip('.')
             level = len(module) - len(module_name)
+
             module = __import__(module_name, globals=globs, level=level)
-            func = inner.func = getattr(module, func_name)
+            if not level:
+                module = sys.modules[module_name]
+
+            try:
+                func = inner.func = getattr(module, func_name)
+            except AttributeError:
+                raise AttributeError("module '%s' has no attribute '%s'" % (module.__name__, func_name))
 
         return func(*args, **kwargs)
 
