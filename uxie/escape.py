@@ -33,6 +33,6 @@ class Manager(object):
             _, _, obj = self.escape_stack.pop()
             if obj.is_active():
                 obj.cancel()
-                return False
+                return True
 
-        return True
+        return False
