@@ -137,7 +137,7 @@ class Activator(object):
         window.connect('key-press-event', self.on_key_press)
 
     def on_key_press(self, window, event):
-        key = event.keyval, event.state
+        key = event.keyval, event.state & ~8192
         try:
             if key in self.shortcuts and self.shortcuts[key][0][0] < 0:
                 return False
@@ -276,7 +276,6 @@ class Activator(object):
         cache = self.get_context_cache(window)
 
         window.last_shortcut = key, modifier
-
         for pr, ctx, name, _ in self.shortcuts[(key, modifier)]:
             if pr > found_priority:
                 break
