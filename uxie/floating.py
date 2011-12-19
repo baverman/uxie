@@ -78,18 +78,25 @@ class FeedbackHelper(object):
 class Feedback(object):
     def __init__(self, widget):
         self.widget = widget
+        self.cancel_cb = None
 
     def get_size(self):
         return self.widget.size_request()
 
     def cancel(self):
         if self.widget:
+            if self.cancel_cb:
+                self.cancel_cb(self)
+
             remove_float(self.widget)
             self.widget = None
 
     def is_active(self):
         return self.widget is not None
 
+    def on_cancel(self, cancel_cb):
+        self.cancel_cb = cancel_cb
+        return self
 
 class TextFeedback(Feedback):
     COLORS = {
