@@ -20,20 +20,20 @@ class Injector(object):
     def on(self, *context):
         return self.activator.on(*context)
 
-    def bind_accel(self, ctx, name, menu_entry, accel, callback, priority=None, *args):
-        return self.activator.bind_accel(ctx, name, menu_entry, accel, callback, priority, *args)
-
     def bind(self, ctx, name, menu_entry, callback, *args):
         return self.activator.bind(ctx, name, menu_entry, callback, *args)
 
+    def bind_check(self, ctx, name, menu_entry, callback, *args):
+        return self.activator.bind_check(ctx, name, menu_entry, callback, *args)
+
+    def bind_menu(self, menu_entry):
+        return self.activator.bind_menu(menu_entry)
+
+    def bind_dynamic(self, ctx, name, menu_entry, generator, resolver):
+        return self.activator.bind_dynamic(ctx, name, menu_entry, generator, resolver)
+
     def map(self, ctx, name, accel, priority=None):
         return self.activator.map(ctx, name, accel, priority)
-
-    def bind_menu(self, ctx, name, menu_entry, generator, resolver):
-        return self.activator.bind_menu(ctx, name, menu_entry, generator, resolver)
-
-    def map_menu(self, path, accel, priority=None):
-        return self.activator.map_menu(path, accel, priority)
 
     def add_context(self, ctx, depends, callback):
         return self.activator.add_context(ctx, depends, callback)

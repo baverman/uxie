@@ -15,12 +15,18 @@ def parse_accel(accel, priority=None):
     if priority is None:
         priority = DEFAULT_PRIORITY
 
-    key, modifier = km = gtk.accelerator_parse(accel)
+    key, _modifier = km = gtk.accelerator_parse(accel)
     if key == 0:
         import warnings
         warnings.warn("Can't parse %s" % accel)
 
     return km, priority
+
+def normalize_context(ctx):
+    if isinstance(ctx, tuple):
+        return ctx
+    else:
+        return (ctx,)
 
 
 class KeyMap(object):
@@ -55,9 +61,8 @@ class KeyMap(object):
         self.generic_shortcuts.setdefault(name, []).append(parse_accel(accel, priority))
 
     def map_generic(self, name, accel, priority=None):
-        if name in self.changed_generics:
-            self.default_generics.setdefault(name, []).append(parse_accel(accel, priority))
-        else:
+        self.default_generics.setdefault(name, []).append(parse_accel(accel, priority))
+        if name not in self.changed_generics:
             self._map_generic(name, accel, priority)
 
     def get_activator(self, window=None, config_section=None):
@@ -66,10 +71,12 @@ class KeyMap(object):
 
     def replace_generics(self, name, keys):
         if name in self.default_generics and set(self.default_generics[name]) == set(keys):
-            if name in self.changed_generics:
-                del self.changed_generics[name]
+            self.changed_generics.pop(name, None)
         else:
-            self.changed_generics[name] = [(gtk.accelerator_name(*km), pr) for km, pr in keys]
+            if keys:
+                self.changed_generics[name] = [(gtk.accelerator_name(*km), pr) for km, pr in keys]
+            else:
+                self.changed_generics.pop(name, None)
 
         self.generic_shortcuts.setdefault(name, [])[:] = []
         for km, pr in keys:
@@ -90,6 +97,7 @@ class KeyMap(object):
                     print >> f, '    %s: %s,' % (repr(name), repr(shortcuts))
                 print >> f, '}\n'
 
+
 class ContextHolder(object):
     def __init__(self, activator, context):
         self.activator = activator
@@ -99,10 +107,10 @@ class ContextHolder(object):
         self.activator.map(self.context, name, accel, priority)
 
     def bind(self, name, menu_entry, callback, *args):
-        self.activator.bind(self.context, name, menu_entry, callback, *args)
+        return self.activator.bind(self.context, name, menu_entry, callback, *args)
 
-    def bind_accel(self, name, menu_entry, accel, callback, priority=None, *args):
-        self.activator.bind_accel(self.context, name, menu_entry, accel, callback, priority, *args)
+    def bind_check(self, name, menu_entry, callback, *args):
+        return self.activator.bind_check(self.context, name, menu_entry, callback, *args)
 
     def __enter__(self):
         return self
@@ -110,13 +118,189 @@ class ContextHolder(object):
     def __exit__(self, exc_type, exc_val, exc_tb):
         pass
 
+
+class AccelBinder(object):
+    def __init__(self, activator, context, name):
+        self.activator = activator
+        self.context = context
+        self.name = name
+
+    def to(self, accel, priority=None):
+        self.activator.map(self.context, self.name, accel, priority)
+        return self
+
+
+def create_entry_widget(cls, title, km):
+    if km:
+        item = cls(None, True)
+        box = gtk.HBox(False, 20)
+        label = gtk.Label(title)
+        label.set_alignment(0, 0.5)
+        label.set_use_underline(True)
+        box.pack_start(label)
+
+        full_accel_str = ', '.join(gtk.accelerator_get_label(*r[0]) for r in km)
+        if len(km) > 1:
+            accel_label = gtk.Label(gtk.accelerator_get_label(*km[0][0]) + '>')
+            accel_label.set_tooltip_text(full_accel_str)
+        else:
+            accel_label = gtk.Label(full_accel_str)
+
+        accel_label.set_alignment(1, 0.5)
+        accel_label.modify_fg(gtk.STATE_NORMAL, accel_label.style.fg[gtk.STATE_INSENSITIVE])
+        accel_label.modify_fg(gtk.STATE_PRELIGHT, accel_label.style.fg[gtk.STATE_INSENSITIVE])
+        box.pack_start(accel_label)
+        item.add(box)
+    else:
+        item = cls(title, True)
+
+    return item
+
+
+class BaseEntry(object):
+    def __init__(self, ctx, name):
+        self.ctx = ctx
+        self.name = name
+        self.title = 'Unknown'
+
+    def get_widget(self, _ctx_getterm, km):
+        return create_entry_widget(gtk.MenuItem, self.title, km)
+
+    def __repr__(self):
+        return 'Entry(%s, %s, %s)' % (self.ctx, self.name, self.title)
+
+    def is_match(self, ctx_getter):
+        ctx_obj = ctx_getter(self.ctx)
+        return ctx_obj is not None
+
+
+class Entry(BaseEntry):
+    def __init__(self, ctx, name, callback, args):
+        BaseEntry.__init__(self, ctx, name)
+        self.callback = callback
+        self.args = args
+
+    def __call__(self, ctx_getter):
+        ctx_obj = ctx_getter(self.ctx)
+        return self.callback(*(ctx_obj + self.args))
+
+
+class CheckEntry(Entry):
+    def __call__(self, ctx_getter):
+        ctx_obj = ctx_getter(self.ctx)
+        return self.callback(*(ctx_obj + self.args))
+
+    def get_widget(self, ctx_getter, km):
+        widget = create_entry_widget(gtk.CheckMenuItem, self.title, km)
+        ctx_obj = ctx_getter(self.ctx)
+        widget.set_active(self.callback(*(ctx_obj + (False,) + self.args)))
+        return widget
+
+    def __call__(self, ctx_getter):
+        ctx_obj = ctx_getter(self.ctx)
+        return self.callback(*(ctx_obj + (True,) + self.args))
+
+
+class DEntry(Entry):
+    def __init__(self, ctx, name, title, callback, args):
+        Entry.__init__(self, ctx, name, callback, args)
+        self.title = title
+
+    def __call__(self, _ctx_getter):
+        return self.callback(*self.args)
+
+
+class MultyEntry(BaseEntry):
+    def __init__(self, ctx, name, generator, resolver):
+        BaseEntry.__init__(self, ctx, name)
+        self.generator = generator
+        self.resolver = resolver
+
+    def get_entries(self, ctx_getter):
+        for title, eid, cb in self.generator(*ctx_getter(self.ctx)):
+            yield DEntry(self.ctx, self.name + '/' + eid, title, *cb)
+
+    def resolve(self, *args):
+        result = self.resolver(*args)
+        if result:
+            cb, args, title = result
+            return DEntry(self.ctx, None, title, cb, args)
+
+
+class MenuEntry(object):
+    def __init__(self):
+        self.entries = []
+        self.items = {}
+        self.idx = 0
+        self.path = ''
+        self.ctx = ('window', 'activator')
+
+    def get_widget(self, _ctx_getter, km):
+        return create_entry_widget(gtk.MenuItem, self.title, km)
+
+    def get_entry(self, label, default=None, default_cb=None):
+        label, _, idx = label.partition('#')
+        entry = label.replace('_', '')
+        try:
+            return self.items[entry]
+        except KeyError:
+            pass
+
+        if default_cb:
+            default = default_cb()
+
+        if default:
+            if not idx:
+                idx = self.idx
+            else:
+                idx = int(idx)
+
+            self.idx = idx
+            self.entries.insert(bisect([i for i, _ in self.entries], idx), (idx, entry))
+
+            default.path = (self.path + '/' + entry) if self.path else entry
+            default.title = label
+            if isinstance(default, MenuEntry):
+                default.name = '!show-menu/' + default.path
+            self.items[entry] = default
+            return default
+        else:
+            raise KeyError(label)
+
+    def get_entry_for_path(self, path):
+        if not path:
+            return self
+
+        entry = self
+        for r in path.split('/'):
+            entry = entry.get_entry(r)
+
+        return entry
+
+    def get_entries(self, ctx_getter):
+        for _, e in self.entries:
+            entry = self.items[e]
+            if entry.is_match(ctx_getter):
+                if isinstance(entry, MultyEntry):
+                    for dentry in entry.get_entries(ctx_getter):
+                        yield dentry
+                else:
+                    yield entry
+
+    def is_match(*args):
+        return True
+
+    def __repr__(self):
+        return 'MenuEntry(%s)' % self.path
+
+
 class Activator(object):
     def __init__(self, keymap, window=None, changed_shortcuts=None):
         self.accel_group = gtk.AccelGroup()
         self.actions = {}
         self.shortcuts = {}
         self.contexts = {}
-        self.menu_entries = [[], {}, 0, 'Root']
+        self.menu = MenuEntry()
         self.dyn_menu = {}
 
         self.keymap = keymap
@@ -126,8 +310,8 @@ class Activator(object):
         self.changed_shortcuts = changed_shortcuts
         self._map_changed_shortcuts()
 
-        self.bind(('window', 'activator'), 'root-menu', 'Root menu', show_actions_menu(''))
-        self.bind_menu(('window', 'activator'), 'show-menu', None, None, actions_menu_resolver)
+        self.bind(('window', 'activator'), 'root-menu', None, show_actions_menu(''))
+        self.bind_dynamic(('window', 'activator'), 'show-menu', None, None, actions_menu_resolver)
 
         if window:
             self.attach(window)
@@ -154,22 +338,11 @@ class Activator(object):
     def on(self, *context):
         return ContextHolder(self, context)
 
-    def normalize_context(self, ctx):
-        if isinstance(ctx, tuple):
-            return ctx
-        else:
-            return (ctx,)
-
     def _map_changed_shortcuts(self):
         if self.changed_shortcuts:
             for (ctx, name), r in self.changed_shortcuts.iteritems():
                 for accel, priority in r:
                     self._map(ctx, name, accel, priority)
-
-    def bind_accel(self, ctx, name, menu_entry, accel, callback, priority=None, *args):
-        ctx = self.normalize_context(ctx)
-        self.bind(ctx, name, menu_entry, callback, *args)
-        self.map(ctx, name, accel, priority)
 
     def _add_shortcut(self, km, ctx, name, priority, is_generic=False):
         shortcuts = self.shortcuts.setdefault(km, [])
@@ -178,63 +351,55 @@ class Activator(object):
 
         shortcuts.insert(bisect(shortcuts, priority), (priority, ctx, name, is_generic))
 
-    def get_menu_entry_list(self, entries, label, new_value):
-        label, _, idx = label.partition('#')
-        entry = label.replace('_', '')
-        try:
-            return entries[1][entry]
-        except KeyError:
-            pass
-
-        if new_value:
-            if not idx:
-                idx = entries[2]
-            else:
-                idx = int(idx)
-
-            entries[2] = idx
-            entries[0].insert(bisect([i for i, e in entries[0]], idx), (idx, entry))
-
-            v = new_value(label)
-            entries[1][entry] = v
-            return v
-        else:
-            raise KeyError(label)
-
-    def add_menu_entry(self, menu_entry, ctx=None, name=None):
+    def add_menu_entry(self, menu_entry, entry=None):
+        new_submenu = lambda: MenuEntry()
+        menu = self.menu
         items = menu_entry.split('/')
-        entries = self.menu_entries
-
-        new_submenu = lambda l: [[], {}, 1, l]
         for r in items[:-1]:
-            entries = self.get_menu_entry_list(entries, r, new_submenu)
+            menu = menu.get_entry(r, default_cb=new_submenu)
 
         if items[-1]:
-            assert ctx is not None and name
-            self.get_menu_entry_list(entries, items[-1], lambda l:(ctx, name, l))
+            assert entry
+            menu = menu.get_entry(items[-1], entry)
+
+        return menu
 
     def bind(self, ctx, name, menu_entry, callback, *args):
-        ctx = self.normalize_context(ctx)
-        self.actions.setdefault(ctx, {})[name] = callback, args, menu_entry
+        ctx = normalize_context(ctx)
+        entry = self.actions.setdefault(ctx, {})[name] = Entry(ctx, name, callback, args)
 
         if menu_entry:
-            self.add_menu_entry(menu_entry, ctx, name)
+            self.add_menu_entry(menu_entry, entry)
 
         if name in self.generic_shortcuts:
             for km, priority in self.generic_shortcuts[name]:
                 self._add_shortcut(km, ctx, name, -priority, True)
 
-    def bind_menu(self, ctx, name, menu_entry, generator, resolver):
-        ctx = self.normalize_context(ctx)
-        name = '!' + name
+        return AccelBinder(self, ctx, name)
+
+    def bind_check(self, ctx, name, menu_entry, callback, *args):
+        ctx = normalize_context(ctx)
+        entry = self.actions.setdefault(ctx, {})[name] = CheckEntry(ctx, name, callback, args)
 
         if menu_entry:
-            self.add_menu_entry(menu_entry + '/_entries', ctx, name)
+            self.add_menu_entry(menu_entry, entry)
 
-        self.actions.setdefault(ctx, {})[name] = generator, resolver, menu_entry
+        if name in self.generic_shortcuts:
+            for km, priority in self.generic_shortcuts[name]:
+                self._add_shortcut(km, ctx, name, -priority, True)
 
-    def map_menu(self, path, accel, priority=None):
-        self.map(('window', 'activator'), '!show-menu/' + path, accel, priority)
+        return AccelBinder(self, ctx, name)
+
+    def bind_menu(self, menu_entry):
+        entry = self.add_menu_entry(menu_entry+'/')
+        return AccelBinder(self, entry.ctx, entry.name)
+
+    def bind_dynamic(self, ctx, name, menu_entry, generator, resolver):
+        ctx = normalize_context(ctx)
+        name = '!' + name
+        entry = self.actions.setdefault(ctx, {})[name] = MultyEntry(ctx, name, generator, resolver)
+        if menu_entry:
+            self.add_menu_entry(menu_entry, entry)
 
     def _map(self, ctx, name, accel, priority=None):
         km, priority = parse_accel(accel, priority)
@@ -242,20 +407,21 @@ class Activator(object):
 
     def map(self, ctx, name, accel, priority=None):
         assert ctx is not None
-        ctx = self.normalize_context(ctx)
+        ctx = normalize_context(ctx)
         key = ctx, name
-        if key in self.changed_shortcuts:
-            self.default_shortcuts.setdefault(key, []).append(parse_accel(accel, priority))
-        else:
+        self.default_shortcuts.setdefault(key, []).append(parse_accel(accel, priority))
+        if key not in self.changed_shortcuts:
             self._map(ctx, name, accel, priority)
 
     def replace_keys(self, ctx, name, keys):
         key = ctx, name
         if key in self.default_shortcuts and set(self.default_shortcuts[key]) == set(keys):
-            if key in self.default_shortcuts:
-                del self.default_shortcuts[key]
+            self.changed_shortcuts.pop(key, None)
         else:
-            self.changed_shortcuts[key] = [(gtk.accelerator_name(*km), pr) for km, pr in keys]
+            if keys:
+                self.changed_shortcuts[key] = [(gtk.accelerator_name(*km), pr) for km, pr in keys]
+            else:
+                self.changed_shortcuts.pop(key, None)
 
         for km in self.shortcuts:
             actions = self.shortcuts[km]
@@ -270,67 +436,52 @@ class Activator(object):
         for km, pr in keys:
             self._add_shortcut(km, ctx, name, -pr, False)
 
-    def activate(self, group, window, key, modifier):
+    def activate(self, _group, window, key, modifier):
         found_priority = 10000
         actions = []
-        cache = self.get_context_cache(window)
+        ctx_getter = self.make_context_getter(window)
 
         window.last_shortcut = key, modifier
         for pr, ctx, name, _ in self.shortcuts[(key, modifier)]:
             if pr > found_priority:
                 break
 
-            ctx_obj = self._find_context(ctx, cache)
+            ctx_obj = ctx_getter(ctx)
             if ctx_obj is not None:
                 try:
-                    cb, args, label = self.actions[ctx][name]
-                    args = ctx_obj + args
+                    action = self.actions[ctx][name]
                 except KeyError:
                     if name[0] == '!':
                         dname, _, param = name.partition('/')
-                        _, resolver, menu_path = self.actions[ctx][dname]
-                        cb, args, label = resolver(*(ctx_obj + (param,)))
-                        if not cb:
+                        dmenu = self.actions[ctx][dname]
+                        action = dmenu.resolve(*(ctx_obj + (param,)))
+                        if not action:
                             continue
-
-                        if menu_path:
-                            label = menu_path + '/' + label
                     else:
                         raise KeyError('%s %s' % (ctx, name))
 
-                actions.append((ctx, name, label, cb, args))
+                actions.append(action)
                 if pr < found_priority:
                     found_priority = pr
 
         if actions:
             if len(actions) == 1:
-                _, _, _, cb, args = actions[0]
-                result = cb(*args)
+                result = action(ctx_getter)
                 return result is None or result
             else:
-                show_dups_menu(actions, window, self, cache)
+                show_dups_menu(actions, window, self, ctx_getter)
 
         return False
 
     def activate_menu_item(self, item):
         item.get_parent().tr_window.last_shortcut = None, None
-
-        ctx, name, obj = item.activate_context
-        if item.contains_all_run_data:
-            cb, args = obj
-            cb(*args)
-        else:
-            if name.startswith('!'):
-                obj()
-            else:
-                cb, args, _ = self.actions[ctx][name]
-                cb(*(obj + args))
+        item.entry(item.ctx_getter)
 
     def on_menu_key_press(self, menu, event):
         if event.keyval == F2:
             item = getattr(menu, 'current_item', None)
             if item:
-                w = ShortcutChangeDialog(self, *item.activate_context[:2])
+                w = ShortcutChangeDialog(self, item.entry.ctx, item.entry.name)
                 w.set_transient_for(menu.tr_window)
                 menu.cancel()
                 w.show_all()
@@ -381,6 +532,13 @@ class Activator(object):
     def get_context(self, window, ctx):
         return self._find_context(ctx, self.get_context_cache(window))
 
+    def make_context_getter(self, window):
+        cache = self.get_context_cache(window)
+        def ctx_getter(ctx):
+            return self._find_context(ctx, cache)
+
+        return ctx_getter
+
     def get_km_for_action(self, ctx, name):
         result = []
         for km, actions in self.shortcuts.iteritems():
@@ -390,104 +548,46 @@ class Activator(object):
 
         return result
 
-    def get_allowed_actions(self, window, path, cache=None):
-        cache = cache or self.get_context_cache(window)
-
-        def get_actions(entries, path):
-            entries, data, _, _ = entries
-            if path:
-                path += '/'
-
-            for _, entry in entries:
-                if not path and entry == 'Root menu': continue
-
-                v = data[entry]
-                if isinstance(v, list):
-                    yield v[-1], 'menu', False, (path + entry, get_actions(v, path + entry))
-                else:
-                    ctx, name, label = v
-                    ctx_obj = self._find_context(ctx, cache)
-                    if ctx_obj is not None:
-                        if name.startswith('!'):
-                            cb, args, _ = self.actions[ctx][name]
-                            for lb, action_name, cb_and_args in cb(*ctx_obj):
-                                yield (lb, 'item', True,
-                                    (ctx, '%s/%s' % (name, action_name), cb_and_args))
-                        else:
-                            yield label, 'item', False, (ctx, name, ctx_obj)
-
-        entries = self.menu_entries
-        if path:
-            for r in path.split('/'):
-                entries = self.get_menu_entry_list(entries, r, None)
-
-        return get_actions(entries, path)
-
     def add_context(self, ctx, depends, callback):
         if isinstance(depends, str):
             depends = (depends,)
         self.contexts[ctx] = depends, callback
 
+
 def on_item_select(item, is_select):
     item.get_parent().current_item = item if is_select else None
 
-def fill_menu(menu, window, activator, actions):
+def fill_menu(menu, window, activator, ctx_getter, actions):
     menu.set_reserve_toggle_size(False)
     menu.tr_window = window
 
-    def activate_sub_menu(item, items):
+    def activate_sub_menu(item, entry):
         menu = item.get_submenu()
         if not getattr(menu, 'already_filled', None):
-            fill_menu(menu, window, activator, items)
+            fill_menu(menu, window, activator, ctx_getter, entry.get_entries(ctx_getter))
             menu.already_filled = True
 
-    for label, t, ard, v in actions:
-        if t == 'item':
-            acontext = v
-            submenu = None
-        else:
-            acontext = ('window', 'activator'), '!show-menu/' + v[0]
-            submenu = gtk.Menu()
-
-        km = activator.get_km_for_action(*acontext[:2])
-        if km:
-            item = gtk.MenuItem(None, True)
-            box = gtk.HBox(False, 20)
-            label = gtk.Label(label)
-            label.set_alignment(0, 0.5)
-            label.set_use_underline(True)
-            box.pack_start(label)
-
-            full_accel_str = ', '.join(gtk.accelerator_get_label(*r[0]) for r in km)
-            if len(km) > 1:
-                accel_label = gtk.Label(gtk.accelerator_get_label(*km[0][0]) + '>')
-                accel_label.set_tooltip_text(full_accel_str)
-            else:
-                accel_label = gtk.Label(full_accel_str)
-
-            accel_label.set_alignment(1, 0.5)
-            accel_label.modify_fg(gtk.STATE_NORMAL, accel_label.style.fg[gtk.STATE_INSENSITIVE])
-            accel_label.modify_fg(gtk.STATE_PRELIGHT, accel_label.style.fg[gtk.STATE_INSENSITIVE])
-            box.pack_start(accel_label)
-            item.add(box)
-        else:
-            item = gtk.MenuItem(label, True)
-
-        if submenu:
-            item.set_submenu(submenu)
-            item.connect('activate', activate_sub_menu, v[1])
+    for entry in actions:
+        km = activator.get_km_for_action(entry.ctx, entry.name)
+        item = entry.get_widget(ctx_getter, km)
+        if isinstance(entry, MenuEntry):
+            item.set_submenu(gtk.Menu())
+            item.connect('activate', activate_sub_menu, entry)
         else:
             item.connect('activate', activator.activate_menu_item)
 
-        item.contains_all_run_data = ard
+        #item.contains_all_run_data = ard
 
-        item.activate_context = acontext
+        #item.activate_context = acontext
         item.connect_after('select', on_item_select, True)
         item.connect_after('deselect', on_item_select, False)
+        item.entry = entry
+        item.ctx_getter = ctx_getter
         menu.append(item)
 
     menu.connect('key-press-event', activator.on_menu_key_press)
     menu.show_all()
+
 
 def actions_menu_resolver(window, activator, path=''):
     return show_actions_menu(path), (window, activator), path
@@ -505,10 +605,11 @@ def popup_menu(menu, window):
 
 def show_actions_menu(path=''):
     def inner(window, activator):
-        actions = activator.get_allowed_actions(window, path)
+        ctx_getter = activator.make_context_getter(window)
+        actions = activator.menu.get_entry_for_path(path).get_entries(ctx_getter)
 
         menu = gtk.Menu()
-        fill_menu(menu, window, activator, actions)
+        fill_menu(menu, window, activator, ctx_getter, actions)
         popup_menu(menu, window)
 
     return inner
@@ -613,12 +714,12 @@ class ShortcutChangeDialog(gtk.Window):
 
         model.append((0, 0, 0))
 
-    def on_accel_edited(self, renderer, path, key, mod, code, model):
+    def on_accel_edited(self, _renderer, path, key, mod, _code, model):
         model[path][0] = key
         model[path][1] = mod
         self.add_rows_if_needed(model)
 
-    def on_accel_cleared(self, renderer, path, model):
+    def on_accel_cleared(self, _renderer, path, model):
         if model[path][0] == model[path][1] == 0:
             model[path][0], model[path][1] = gtk.accelerator_parse('BackSpace')
         else:
@@ -627,7 +728,7 @@ class ShortcutChangeDialog(gtk.Window):
 
         self.add_rows_if_needed(model)
 
-    def on_priority_edited(self, renderer, path, text, model):
+    def on_priority_edited(_self, _renderer, path, text, model):
         model[path][2] = int(text)
 
     def create_view(self, ctx, items):
@@ -680,7 +781,7 @@ class ShortcutChangeDialog(gtk.Window):
         self.activator.replace_keys(ctx, name, list(self.get_keys(self.ctx_model)))
         self.activator.keymap.save()
 
-    def on_key_press_event(self, window, event):
+    def on_key_press_event(self, _window, event):
         if event.keyval == Escape:
             self.quit()
             self.destroy()
