@@ -210,7 +210,7 @@ class DEntry(Entry):
         return self.callback(*self.args)
 
 
-class MultyEntry(BaseEntry):
+class MultiEntry(BaseEntry):
     def __init__(self, ctx, name, generator, resolver):
         BaseEntry.__init__(self, ctx, name)
         self.generator = generator
@@ -225,6 +225,29 @@ class MultyEntry(BaseEntry):
         if result:
             cb, args, title = result
             return DEntry(self.ctx, None, title, cb, args)
+
+
+class DRadioEntry(DEntry):
+    def get_widget(self, _ctx_getter, km):
+        widget = create_entry_widget(
+            lambda label, underline:gtk.RadioMenuItem(None, label, underline), self.title, km)
+        widget.set_active(self.is_active)
+        return widget
+
+class RadioEntry(MultiEntry):
+    def get_entries(self, ctx_getter):
+        for is_active, title, eid, cb in self.generator(*ctx_getter(self.ctx)):
+            entry = DRadioEntry(self.ctx, self.name + '/' + eid, title, *cb)
+            entry.is_active = is_active
+            yield entry
+
+    def resolve(self, *args):
+        result = self.resolver(*args)
+        if result:
+            is_active, cb, args, title = result
+            entry = DRadioEntry(self.ctx, None, title, cb, args)
+            entry.is_active = is_active
+            return entry
 
 
 class MenuEntry(object):
@@ -281,7 +304,7 @@ class MenuEntry(object):
         for _, e in self.entries:
             entry = self.items[e]
             if entry.is_match(ctx_getter):
-                if isinstance(entry, MultyEntry):
+                if isinstance(entry, MultiEntry):
                     for dentry in entry.get_entries(ctx_getter):
                         yield dentry
                 else:
@@ -394,10 +417,11 @@ class Activator(object):
         entry = self.add_menu_entry(menu_entry+'/')
         return AccelBinder(self, entry.ctx, entry.name)
 
-    def bind_dynamic(self, ctx, name, menu_entry, generator, resolver):
+    def bind_dynamic(self, ctx, name, menu_entry, generator, resolver, as_radio=False):
         ctx = normalize_context(ctx)
         name = '!' + name
-        entry = self.actions.setdefault(ctx, {})[name] = MultyEntry(ctx, name, generator, resolver)
+        cls = RadioEntry if as_radio else MultiEntry
+        entry = self.actions.setdefault(ctx, {})[name] = cls(ctx, name, generator, resolver)
         if menu_entry:
             self.add_menu_entry(menu_entry, entry)
 

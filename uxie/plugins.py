@@ -29,8 +29,8 @@ class Injector(object):
     def bind_menu(self, menu_entry):
         return self.activator.bind_menu(menu_entry)
 
-    def bind_dynamic(self, ctx, name, menu_entry, generator, resolver):
-        return self.activator.bind_dynamic(ctx, name, menu_entry, generator, resolver)
+    def bind_dynamic(self, ctx, name, menu_entry, generator, resolver, as_radio=False):
+        return self.activator.bind_dynamic(ctx, name, menu_entry, generator, resolver, as_radio)
 
     def map(self, ctx, name, accel, priority=None):
         return self.activator.map(ctx, name, accel, priority)
