@@ -73,7 +73,7 @@ class KeyMap(object):
         if name in self.default_generics and set(self.default_generics[name]) == set(keys):
             self.changed_generics.pop(name, None)
         else:
-            if keys:
+            if keys or name in self.default_generics:
                 self.changed_generics[name] = [(gtk.accelerator_name(*km), pr) for km, pr in keys]
             else:
                 self.changed_generics.pop(name, None)
@@ -442,7 +442,7 @@ class Activator(object):
         if key in self.default_shortcuts and set(self.default_shortcuts[key]) == set(keys):
             self.changed_shortcuts.pop(key, None)
         else:
-            if keys:
+            if keys or key in self.default_shortcuts:
                 self.changed_shortcuts[key] = [(gtk.accelerator_name(*km), pr) for km, pr in keys]
             else:
                 self.changed_shortcuts.pop(key, None)
