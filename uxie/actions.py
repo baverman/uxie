@@ -220,11 +220,11 @@ class MultiEntry(BaseEntry):
         for title, eid, cb in self.generator(*ctx_getter(self.ctx)):
             yield DEntry(self.ctx, self.name + '/' + eid, title, *cb)
 
-    def resolve(self, *args):
-        result = self.resolver(*args)
+    def resolve(self, ctx_obj, param):
+        result = self.resolver(*(ctx_obj + (param,)))
         if result:
             cb, args, title = result
-            return DEntry(self.ctx, None, title, cb, args)
+            return DEntry(self.ctx, self.name + '/' + param, title, cb, args)
 
 
 class DRadioEntry(DEntry):
@@ -478,7 +478,7 @@ class Activator(object):
                     if name[0] == '!':
                         dname, _, param = name.partition('/')
                         dmenu = self.actions[ctx][dname]
-                        action = dmenu.resolve(*(ctx_obj + (param,)))
+                        action = dmenu.resolve(ctx_obj, param)
                         if not action:
                             continue
                     else:
@@ -493,7 +493,7 @@ class Activator(object):
                 result = action(ctx_getter)
                 return result is None or result
             else:
-                show_dups_menu(actions, window, self, ctx_getter)
+                show_dups_menu(window, self, ctx_getter, actions)
 
         return False
 
@@ -638,19 +638,16 @@ def show_actions_menu(path=''):
 
     return inner
 
-def show_dups_menu(dups, window, activator, context_cache):
-    actions = []
-    for ctx, name, label, cb, args in dups:
-        label = label.replace('_', '').replace('$', '')
-        if name.startswith('!show-menu/'):
-            actions.append((label, 'menu', False,
-                (label, activator.get_allowed_actions(window, label, context_cache))))
+def show_dups_menu(window, activator, ctx_getter, actions):
+    menu_actions = []
+    for entry in actions:
+        if entry.name.startswith('!show-menu'):
+            entry = activator.menu.get_entry_for_path(entry.name.partition('/')[2])
 
-        else:
-            actions.append((label, 'item', True, (ctx, name, (cb, args))))
+        menu_actions.append(entry)
 
     menu = gtk.Menu()
-    fill_menu(menu, window, activator, actions)
+    fill_menu(menu, window, activator, ctx_getter, menu_actions)
     popup_menu(menu, window)
 
 def wait_mod_unpress_for_last_shortcut(window, callback):
