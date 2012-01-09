@@ -234,6 +234,7 @@ class DRadioEntry(DEntry):
         widget.set_active(self.is_active)
         return widget
 
+
 class RadioEntry(MultiEntry):
     def get_entries(self, ctx_getter):
         for is_active, title, eid, cb in self.generator(*ctx_getter(self.ctx)):
@@ -399,6 +400,10 @@ class Activator(object):
                 self._add_shortcut(km, ctx, name, -priority, True)
 
         return AccelBinder(self, ctx, name)
+
+    def alias(self, ctx, name, menu_entry):
+        ctx = normalize_context(ctx)
+        self.add_menu_entry(menu_entry, self.actions[ctx][name])
 
     def bind_check(self, ctx, name, menu_entry, callback, *args):
         ctx = normalize_context(ctx)
