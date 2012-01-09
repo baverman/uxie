@@ -241,8 +241,8 @@ class RadioEntry(MultiEntry):
             entry.is_active = is_active
             yield entry
 
-    def resolve(self, *args):
-        result = self.resolver(*args)
+    def resolve(self, ctx_obj, param):
+        result = self.resolver(*(ctx_obj + (param,)))
         if result:
             is_active, cb, args, title = result
             entry = DRadioEntry(self.ctx, None, title, cb, args)
