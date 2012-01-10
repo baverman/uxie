@@ -555,16 +555,12 @@ class Activator(object):
         cache[ctx] = result
         return result
 
-    def get_context_cache(self, window):
-        return {'window':window, 'activator':self}
-
-    def get_context(self, window, ctx):
-        return self._find_context(ctx, self.get_context_cache(window))
-
     def make_context_getter(self, window):
-        cache = self.get_context_cache(window)
+        cache = {'window':window, 'activator':self}
         def ctx_getter(ctx):
             return self._find_context(ctx, cache)
+
+        cache['ctx_getter'] = ctx_getter
 
         return ctx_getter
 
