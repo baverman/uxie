@@ -17,13 +17,16 @@ class Manager(object):
     def __init__(self):
         self.floatings = weakref.WeakKeyDictionary()
 
-    def add(self, parent, floating, priority=0, timeout=0, place_vertically=True):
+    def add(self, parent, floating, priority=None, timeout=None, place_vertically=True):
         if timeout:
             glib.timeout_add(timeout, floating_timeout, weakref.ref(floating))
 
+        if priority is None:
+            priority = 0
+
         floating.start = time.time()
         self.floatings.setdefault(parent, []).append(
-            (priority, floating.start, place_vertically, floating))
+            (-priority, floating.start, place_vertically, floating))
         self.arrange(parent)
         return floating
 
@@ -61,20 +64,6 @@ class Manager(object):
             x -= mw + 5
 
 
-class FeedbackHelper(object):
-    def __init__(self, fm, parent):
-        self.parent = parent
-        self.fm = fm
-
-    def show(self, text, category=None, timeout=None):
-        fb = TextFeedback(text, category)
-        timeout = timeout or fb.timeout
-        return self.fm.add(self.parent, fb , 5, timeout)
-
-    def show_widget(self, widget, priority=0, timeout=None, place_vertically=True):
-        return self.fm.add(self.parent, Feedback(widget), priority, timeout, place_vertically)
-
-
 class Feedback(object):
     def __init__(self, widget):
         self.widget = widget
@@ -97,6 +86,7 @@ class Feedback(object):
     def on_cancel(self, cancel_cb):
         self.cancel_cb = cancel_cb
         return self
+
 
 class TextFeedback(Feedback):
     COLORS = {
