@@ -1,5 +1,6 @@
 import os, sys
 from os.path import join, dirname, exists, expanduser
+from contextlib import contextmanager
 
 import weakref
 
@@ -145,3 +146,11 @@ def widget_is_child_of(widget, parent):
         p = p.get_parent()
 
     return False
+
+@contextmanager
+def text_buffer_user_action(buf):
+    buf.begin_user_action()
+    try:
+        yield
+    finally:
+        buf.end_user_action()
