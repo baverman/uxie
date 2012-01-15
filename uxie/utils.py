@@ -132,3 +132,16 @@ def lazy_func(name):
         return func(*args, **kwargs)
 
     return inner
+
+def widget_is_child_of(widget, parent):
+    if not parent:
+        return False
+
+    p = widget.get_parent()
+    while p:
+        if p is parent:
+            return True
+
+        p = p.get_parent()
+
+    return False
