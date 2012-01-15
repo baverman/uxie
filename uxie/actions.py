@@ -193,7 +193,7 @@ class CheckEntry(Entry):
     def get_widget(self, ctx_getter, km):
         widget = create_entry_widget(gtk.CheckMenuItem, self.title, km)
         ctx_obj = ctx_getter(self.ctx)
-        widget.set_active(self.callback(*(ctx_obj + (False,) + self.args)))
+        widget.set_active(bool(self.callback(*(ctx_obj + (False,) + self.args))))
         return widget
 
     def __call__(self, ctx_getter):
