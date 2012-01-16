@@ -64,6 +64,20 @@ class Manager(object):
             x -= mw + 5
 
 
+class FeedbackHelper(object):
+    def __init__(self, fm, parent):
+        self.parent = parent
+        self.fm = fm
+
+    def show(self, text, category=None, timeout=None):
+        fb = TextFeedback(text, category)
+        timeout = timeout or fb.timeout
+        return self.fm.add(self.parent, fb, timeout=timeout)
+
+    def show_widget(self, widget, priority=None, timeout=None, place_vertically=True):
+        return self.fm.add(self.parent, Feedback(widget), priority, timeout, place_vertically)
+
+
 class Feedback(object):
     def __init__(self, widget):
         self.widget = widget
