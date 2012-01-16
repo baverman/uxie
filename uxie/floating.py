@@ -134,6 +134,7 @@ class TextFeedback(Feedback):
         label.set_padding(7, 5)
         label.set_selectable(True)
         box.pack_start(label, True, True)
+        self.label = label
 
         Feedback.__init__(self, w)
 
